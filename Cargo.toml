@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/koma-app",
+    "crates/koma-cli",
+    "crates/koma-core",
+    "crates/koma-ipc",
+    "vendor/makepad-app-browser-host",
+]
+default-members = [
+    "crates/koma-app",
+    "crates/koma-cli",
+    "crates/koma-core",
+    "crates/koma-ipc",
+]
+
+[patch."https://github.com/makepad/makepad"]
+makepad-browser-view = { path = "vendor/makepad-browser-view" }
+makepad-app-terminal = { path = "vendor/makepad-app-terminal" }
+makepad-hal = { path = "vendor/makepad-hal" }
+makepad-cef = { path = "vendor/makepad-cef" }

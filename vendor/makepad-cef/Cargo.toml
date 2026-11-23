@@ -1,0 +1,21 @@
+[package]
+name = "makepad-cef"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+libloading = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-error-log = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-alloc-epoch = { git = "https://github.com/makepad/makepad", branch = "main" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+makepad-objc-sys = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-hal = { git = "https://github.com/makepad/makepad", branch = "main" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+makepad-hal = { git = "https://github.com/makepad/makepad", branch = "main" }
+
+[target.'cfg(windows)'.dependencies]
+makepad-hal = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-windows-sys = { git = "https://github.com/makepad/makepad", branch = "main" }

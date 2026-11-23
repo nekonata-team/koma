@@ -1,0 +1,18 @@
+[package]
+name = "koma-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+koma-core = { path = "../koma-core" }
+koma-ipc = { path = "../koma-ipc" }
+makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-browser-view = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-app-terminal = { git = "https://github.com/makepad/makepad", branch = "main", default-features = false }
+makepad-micro-serde = { git = "https://github.com/makepad/makepad", branch = "main" }
+toml = "1.2.1"
+
+[dev-dependencies]
+makepad-app-host = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-studio-protocol = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-platform = { git = "https://github.com/makepad/makepad", branch = "main" }

@@ -1,0 +1,45 @@
+# terminal — a first-class terminal emulator as a plain full-window Makepad app.
+#
+# The VT core under src/term/ is a clean Rust port of Ghostty's terminal
+# subsystem (github.com/ghostty-org/ghostty, MIT license — see
+# src/term/mod.rs for attribution). The PTY layer is carried over from
+# makepad-terminal-core, which had already solved spawn/resize/controlling-tty
+# on macOS, Linux and Windows (ConPTY).
+#
+# terminal runs standalone, and unmodified inside makepad-app-wm / Studio tiles via
+# the shared --stdin-loop client runtime every Makepad app has.
+
+[package]
+name = "makepad-app-terminal"
+version = "0.1.0"
+edition = "2021"
+license = "MIT AND Unicode-3.0"
+default-run = "makepad-app-terminal"
+
+[lib]
+name = "makepad_app_terminal"
+path = "src/lib.rs"
+
+[[bin]]
+name = "makepad-app-terminal"
+path = "src/main.rs"
+
+[features]
+default = []
+tweaker = ["dep:makepad-widgets-tweaker", "makepad-widgets/data", "makepad-widgets/dock", "makepad-widgets/fab"]
+
+[dependencies]
+makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "main", default-features = false }
+makepad-widgets-tweaker = { git = "https://github.com/makepad/makepad", branch = "main", optional = true }
+makepad-ai-services = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-strict-json = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-cell-width = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-wm-api = { git = "https://github.com/makepad/makepad", branch = "main" }
+# The environment its shell starts with (child_env::scrub).
+makepad-app-registry = { git = "https://github.com/makepad/makepad", branch = "main" }
+
+[target.'cfg(windows)'.dependencies.windows]
+package = "makepad-windows-sys"
+git = "https://github.com/makepad/makepad"
+branch = "main"
+version = "0.1.0"

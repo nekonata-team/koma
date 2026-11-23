@@ -1,0 +1,3 @@
+[bans]
+multiple-versions = "allow"
+deny = ["makepad-cef", "makepad-app-browser-host"]

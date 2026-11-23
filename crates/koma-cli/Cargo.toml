@@ -1,0 +1,13 @@
+[package]
+name = "koma-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "koma"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6", features = ["derive"] }
+koma-ipc = { path = "../koma-ipc" }
+makepad-micro-serde = { git = "https://github.com/makepad/makepad", branch = "main" }

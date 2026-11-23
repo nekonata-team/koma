@@ -1,0 +1,47 @@
+[package]
+name = "makepad-hal"
+version = "1.0.0"
+authors = ["Makepad <info@makepad.nl>"]
+edition = "2021"
+description = "Makepad HAL: the command/event interface below Cx (windows, GPU resources, input, timers), its session tables, GPU ledger and a headless backend"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/makepad/makepad/"
+repository = "https://github.com/makepad/makepad/"
+
+[dependencies]
+makepad-a11y = { git = "https://github.com/makepad/makepad", branch = "main", version = "0.1.0" }
+makepad-relax-api = { git = "https://github.com/makepad/makepad", branch = "main", version = "1.0.0" }
+makepad-key-code = { git = "https://github.com/makepad/makepad", branch = "main", version = "0.1.0" }
+makepad-font-core = { git = "https://github.com/makepad/makepad", branch = "main", version = "1.0.0" }
+fxhash = { git = "https://github.com/makepad/makepad", branch = "main", version = "0.2.1" }
+
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+makepad-vulkan = { git = "https://github.com/makepad/makepad", branch = "main", version = "0.1.0" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+makepad-dbus-wire = { git = "https://github.com/makepad/makepad", branch = "main", version = "0.1.0" }
+makepad-atspi = { git = "https://github.com/makepad/makepad", branch = "main", version = "0.1.0" }
+makepad-zune-jpeg = { git = "https://github.com/makepad/makepad", branch = "main", version = "0.5.15" }
+makepad-math = { git = "https://github.com/makepad/makepad", branch = "main", version = "1.0.0" }
+wayland-client = { git = "https://github.com/makepad/makepad", branch = "main" }
+wayland-protocols = { git = "https://github.com/makepad/makepad", branch = "main", features = ["client", "unstable", "staging"] }
+makepad-studio-protocol = { git = "https://github.com/makepad/makepad", branch = "main", version = "0.1.0" }
+makepad-micro-serde = { git = "https://github.com/makepad/makepad", branch = "main", version = "1.0.0" }
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+makepad-apple-sys = { git = "https://github.com/makepad/makepad", branch = "main", version = "1.0.0" }
+makepad-objc-sys = { git = "https://github.com/makepad/makepad", branch = "main", version = "1.0.0" }
+
+[features]
+host-shims = []
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+makepad-remote = { git = "https://github.com/makepad/makepad", branch = "main", version = "0.1.0" }
+makepad-gpu-trace = { git = "https://github.com/makepad/makepad", branch = "main", version = "1.0.0" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+makepad-jni-sys = { git = "https://github.com/makepad/makepad", branch = "main", version = "0.4.0" }
+makepad-math = { git = "https://github.com/makepad/makepad", branch = "main", version = "1.0.0" }
+
+[target.'cfg(windows)'.dependencies]
+makepad-windows-sys = { git = "https://github.com/makepad/makepad", branch = "main", version = "0.1.0" }
