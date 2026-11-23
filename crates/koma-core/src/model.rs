@@ -1,5 +1,7 @@
 //! Core Koma domain model (UI- and Makepad-independent).
 
+use std::collections::HashMap;
+
 mod drawer;
 mod ids;
 mod notifications;
@@ -170,15 +172,53 @@ impl WorkspaceState {
         }
     }
 
-    /// Restore the Sheet layout while initializing transient state as for a new Workspace.
+    /// Restore Sheets and Drawer while initializing transient state as for a new Workspace.
     pub fn restore_layout(
         profile_id: String,
         mut sheets: Vec<SheetState>,
         active_sheet_index: usize,
+        drawer: Vec<KomaMeta>,
     ) -> Result<Self, String> {
         if active_sheet_index >= sheets.len() {
             return Err("State has no valid active Sheet".into());
         }
+
+        let mut sheet_positions = HashMap::new();
+        for (index, sheet) in sheets.iter().enumerate() {
+            let position = index + 1;
+            if let Some(first) = sheet_positions.insert(&sheet.id, position) {
+                return Err(format!(
+                    "Duplicate Sheet ID {} at Sheet positions {first} and {position}",
+                    sheet.id
+                ));
+            }
+        }
+
+        let mut koma_locations = HashMap::new();
+        let groups = sheets
+            .iter()
+            .map(|sheet| (Some(&sheet.id), sheet.komas.as_slice()))
+            .chain(std::iter::once((None, drawer.as_slice())));
+        for (sheet_id, komas) in groups {
+            for (index, koma) in komas.iter().enumerate() {
+                let position = index + 1;
+                if let Some((first_sheet, first_position)) =
+                    koma_locations.insert(&koma.id, (sheet_id, position))
+                {
+                    let location = |sheet: Option<&SheetId>, position| match sheet {
+                        Some(id) => format!("Sheet {id}, item {position}"),
+                        None => format!("Drawer, item {position}"),
+                    };
+                    return Err(format!(
+                        "Duplicate Koma ID {}: {} and {}",
+                        koma.id,
+                        location(first_sheet, first_position),
+                        location(sheet_id, position)
+                    ));
+                }
+            }
+        }
+
         for sheet in &mut sheets {
             sheet.focused_koma_id = sheet
                 .focused_koma_id
@@ -189,6 +229,7 @@ impl WorkspaceState {
             profile_id,
             sheets,
             active_sheet: active_sheet_index,
+            drawer,
             ..Self::new()
         })
     }
@@ -1003,7 +1044,8 @@ impl WorkspaceState {
             self.next_koma_seq += 1;
             let used = self.koma_by_id(&candidate).is_some()
                 || self.drawer.iter().any(|b| b.id == candidate)
-                || self.discarded_drawer.iter().any(|b| b.id == candidate);
+                || self.discarded_drawer.iter().any(|b| b.id == candidate)
+                || self.closed_komas.iter().any(|(_, b)| b.id == candidate);
             if !used {
                 return candidate;
             }
@@ -1090,17 +1132,33 @@ mod tests {
     }
 
     #[test]
+    fn allocation_skips_the_id_of_a_closed_koma() {
+        let mut state = WorkspaceState::new();
+        let seq = state.next_koma_seq;
+        let closed =
+            state.insert_koma_after_focused(KomaKind::Terminal, "Closed".into(), None, None);
+        state.close_koma(&closed.id, false).unwrap();
+
+        state.next_koma_seq = seq;
+        let created = state.insert_koma_after_focused(KomaKind::Terminal, "New".into(), None, None);
+        assert_ne!(created.id, closed.id);
+        assert_eq!(state.reopen_closed_koma().unwrap().id, closed.id);
+    }
+
+    #[test]
     fn restore_layout_requires_a_valid_active_sheet() {
-        assert!(WorkspaceState::restore_layout("profile-a".into(), Vec::new(), 0).is_err());
+        assert!(WorkspaceState::restore_layout("profile-a".into(), Vec::new(), 0, vec![]).is_err());
         let state = WorkspaceState::new();
-        assert!(WorkspaceState::restore_layout("profile-a".into(), state.sheets, 1).is_err());
+        assert!(
+            WorkspaceState::restore_layout("profile-a".into(), state.sheets, 1, vec![]).is_err()
+        );
     }
 
     #[test]
     fn restore_layout_drops_a_stale_koma_focus() {
         let mut sheets = WorkspaceState::poc_default().sheets;
         sheets[1].focused_koma_id = Some("missing".into());
-        let state = WorkspaceState::restore_layout("profile-a".into(), sheets, 1).unwrap();
+        let state = WorkspaceState::restore_layout("profile-a".into(), sheets, 1, vec![]).unwrap();
         assert_eq!(state.active_sheet_index(), 1);
         assert_eq!(state.current_sheet().focused_koma_id, None);
     }

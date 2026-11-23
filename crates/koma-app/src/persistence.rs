@@ -188,10 +188,10 @@ pub fn from_json(text: &str) -> Result<WorkspaceState, String> {
             komas: p.komas,
         })
         .collect();
-    let mut state = WorkspaceState::restore_layout(saved.profile_id, sheets, saved.active_sheet)?;
+    let mut state =
+        WorkspaceState::restore_layout(saved.profile_id, sheets, saved.active_sheet, drawer)?;
     state.next_koma_seq = saved.next_koma_seq;
     state.next_sheet_seq = saved.next_sheet_seq;
-    state.drawer = drawer;
     state.recents = recents;
     state.personal_presets = personal_presets;
     Ok(state)
@@ -287,7 +287,7 @@ mod tests {
             Some(&loaded.sheets()[0].id)
         );
 
-        // IDs in the saved layout must not affect whether the file is loaded.
+        // Unique IDs that do not follow the current allocation format are still valid.
         save(&dir, &WorkspaceState::poc_default()).unwrap();
         let loaded = load(&dir).unwrap().unwrap();
         assert!(loaded.koma_by_id(&"sheet1-web".into()).is_some());
@@ -304,6 +304,45 @@ mod tests {
         assert!(!dir.join("state.json").exists());
         assert_eq!(load(&dir).unwrap(), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rejects_duplicate_sheet_ids() {
+        let mut saved =
+            SavedState::deserialize_json(&to_json(&WorkspaceState::poc_default())).unwrap();
+        saved.sheets[1].id = saved.sheets[0].id.clone();
+        assert_eq!(
+            from_json(&saved.serialize_json()).unwrap_err(),
+            format!(
+                "Duplicate Sheet ID {} at Sheet positions 1 and 2",
+                saved.sheets[0].id
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_koma_ids_across_sheets_and_drawer() {
+        let mut saved =
+            SavedState::deserialize_json(&to_json(&WorkspaceState::poc_default())).unwrap();
+        let koma = saved.sheets[0].komas[0].clone();
+        let first_sheet = saved.sheets[0].id.clone();
+        let second_sheet = saved.sheets[1].id.clone();
+
+        saved.drawer = Some(vec![koma.clone()]);
+        assert_eq!(
+            from_json(&saved.serialize_json()).unwrap_err(),
+            format!(
+                "Duplicate Koma ID {}: Sheet {first_sheet}, item 1 and Drawer, item 1",
+                koma.id
+            )
+        );
+
+        saved.drawer = None;
+        saved.sheets[1].komas[0] = koma.clone();
+        assert_eq!(
+            from_json(&saved.serialize_json()).unwrap_err(),
+            format!("Duplicate Koma ID {}: Sheet {first_sheet}, item 1 and Sheet {second_sheet}, item 1", koma.id)
+        );
     }
 
     #[test]
