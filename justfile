@@ -1,18 +1,20 @@
 set shell := ["zsh", "-cu"]
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
 _koma_packages := "-p koma-app -p koma-cli -p koma-core -p koma-ipc"
-
-_resolve_root := 'python3 -c "import glob,os,pathlib,tomllib; lock=tomllib.loads(pathlib.Path(\"Cargo.lock\").read_text()); rev=next(p[\"source\"].split(\"#\")[-1][:7] for p in lock[\"package\"] if p[\"name\"]==\"makepad-widgets\"); print(pathlib.Path(glob.glob(os.path.expanduser(f\"~/.cargo/git/checkouts/makepad-*/{rev}/Cargo.toml\"))[0]).parent)"'
-
-_resolve_cef_dist := 'python3 -c "import glob,os,pathlib,platform,tomllib; lock=tomllib.loads(pathlib.Path(\"Cargo.lock\").read_text()); rev=next(p[\"source\"].split(\"#\")[-1][:7] for p in lock[\"package\"] if p[\"name\"]==\"makepad-widgets\"); root=pathlib.Path(glob.glob(os.path.expanduser(f\"~/.cargo/git/checkouts/makepad-*/{rev}/Cargo.toml\"))[0]).parent; s={\"Darwin\":\"macos\",\"Linux\":\"linux\",\"Windows\":\"windows\"}[platform.system()]; a={\"arm64\":\"arm64\",\"aarch64\":\"arm64\",\"x86_64\":\"x64\",\"AMD64\":\"x64\"}[platform.machine()]; p=\"linuxarm64\" if s==\"linux\" and a==\"arm64\" else (\"linux64\" if s==\"linux\" else f\"{s}{a}\"); pb=root/\"local/cef-prebuilt\"; ptr=pb/f\"current-{p}.txt\"; name=ptr.read_text().strip() if ptr.is_file() else f\"current-{p}\"; print(os.environ.get(\"MAKEPAD_CEF_DIST_DIR\") or (pb/name))"'
 
 # レシピ一覧を表示する
 default:
     @just --list
 
 # CEF ランタイムを取得・展開する
+[unix]
 cef-fetch:
-    root=$({{_resolve_root}}) && cargo run --manifest-path "$root/Cargo.toml" -p makepad-cef-fetch -- --fetch
+    rev=$(awk '/^name = "makepad-widgets"/{f=1;next} f && /^source = /{sub(/.*#/,""); print substr($0,1,7); exit}' Cargo.lock) && cargo run --manifest-path "${CARGO_HOME:-$HOME/.cargo}"/git/checkouts/makepad-*/"$rev"/Cargo.toml -p makepad-cef-fetch -- --fetch
+
+[windows]
+cef-fetch:
+    $rev = (Select-String -Path Cargo.lock -Pattern 'name = "makepad-widgets"' -Context 0,2 | ForEach-Object { if ($_.Context.PostContext -join "`n" -match '#([0-9a-f]{7})') { $Matches[1] } } | Select-Object -First 1); $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }; $manifest = Get-Item (Join-Path $cargoHome "git\checkouts\makepad-*\$rev\Cargo.toml") | Select-Object -First 1 -ExpandProperty FullName; cargo run --manifest-path $manifest -p makepad-cef-fetch -- --fetch
 
 # browser_host をビルドする
 cef-host:
@@ -32,7 +34,8 @@ test *args:
 
 # 起動する
 run:
-    cef_dir=$({{_resolve_cef_dist}}) && cargo build -p makepad-app-browser-host && MAKEPAD_CEF_DIST_DIR="$cef_dir" cargo run -p koma-app
+    cargo build -p makepad-app-browser-host
+    cargo run -p koma-app
 
 # koma CLI を実行する
 [positional-arguments]
