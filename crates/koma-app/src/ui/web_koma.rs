@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use koma_core::model::KomaId;
 use makepad_browser_view::{cef_input, ViewOp};
 use makepad_widgets::image::DrawImage;
 use makepad_widgets::*;
@@ -33,7 +34,7 @@ script_mod! {
 pub enum WebKomaAction {
     #[default]
     None,
-    Focused(String),
+    Focused(KomaId),
 }
 
 #[derive(Script, ScriptHook, Widget)]
@@ -52,7 +53,7 @@ pub struct WebKoma {
     #[rust]
     shared_runtime: Option<Rc<RefCell<WebViewRuntime>>>,
     #[rust]
-    koma_id: String,
+    koma_id: Option<KomaId>,
     #[rust]
     initial_url: String,
     #[rust]
@@ -63,11 +64,11 @@ impl WebKoma {
     pub fn bind_shared(
         &mut self,
         runtime: Rc<RefCell<WebViewRuntime>>,
-        koma_id: String,
+        koma_id: KomaId,
         initial_url: String,
     ) {
         self.shared_runtime = Some(runtime);
-        self.koma_id = koma_id;
+        self.koma_id = Some(koma_id);
         self.initial_url = initial_url;
     }
 
@@ -80,7 +81,7 @@ impl WebKoma {
     pub fn focus(&mut self, cx: &mut Cx) -> bool {
         let ready = self.draw_bg.area().is_valid(cx);
         cx.set_key_focus(self.draw_bg.area());
-        self.with_runtime(|rt| rt.focus_koma(cx, Some(&self.koma_id)));
+        self.with_runtime(|rt| rt.focus_koma(cx, self.koma_id.as_ref()));
         ready
     }
 
@@ -90,7 +91,7 @@ impl WebKoma {
             cx.hide_text_ime();
         }
         self.with_runtime(|rt| {
-            if let Some(id) = rt.view_id(&self.koma_id) {
+            if let Some(id) = self.koma_id.as_ref().and_then(|id| rt.view_id(id)) {
                 rt.views_mut().send(id, ViewOp::Focus { on: false });
                 rt.views_mut().service(cx);
             }
@@ -118,7 +119,9 @@ impl Widget for WebKoma {
             self.redraw(cx);
         }
 
-        let bid = &self.koma_id;
+        let Some(bid) = &self.koma_id else {
+            return;
+        };
         let Some(view_id) = self.with_runtime(|rt| rt.view_id(bid)).flatten() else {
             return;
         };
@@ -201,17 +204,18 @@ impl Widget for WebKoma {
     fn draw_walk(&mut self, cx: &mut Cx2d, _scope: &mut Scope, walk: Walk) -> DrawStep {
         let rect = cx.peek_walk_turtle(walk);
         let dpi = cx.current_dpi_factor();
-        let bid = &self.koma_id;
+        let bid = self.koma_id.as_ref();
 
-        let shown = self
-            .with_runtime(|rt| {
+        let shown = bid.and_then(|bid| {
+            self.with_runtime(|rt| {
                 if rect.size.x > 0.0 && rect.size.y > 0.0 {
                     rt.ensure_koma(cx, bid, &self.initial_url, true, rect.size, dpi);
                     rt.set_koma_size(cx, bid, rect.size, dpi);
                 }
                 rt.koma_frame(bid)
             })
-            .flatten();
+            .flatten()
+        });
 
         self.draw_empty.draw_abs(cx, rect);
         match shown {
@@ -231,7 +235,8 @@ impl Widget for WebKoma {
         }
         self.draw_bg.draw_walk(cx, walk);
         if self.has_input_focus(cx) {
-            let ime_caret = self.with_runtime(|rt| rt.koma_ime_caret(bid)).flatten();
+            let ime_caret =
+                bid.and_then(|bid| self.with_runtime(|rt| rt.koma_ime_caret(bid)).flatten());
             let raw_pos = match ime_caret {
                 Some((x, y, _w, h)) => dvec2(x as f64, (y + h.max(16)) as f64),
                 None => self.last_click_local.unwrap_or_else(|| dvec2(16.0, 24.0)),

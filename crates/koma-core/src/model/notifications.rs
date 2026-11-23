@@ -1,9 +1,9 @@
-use super::{step_index, NotificationEntry, WorkspaceState, MAX_NOTIFICATIONS};
+use super::{step_index, KomaId, NotificationEntry, WorkspaceState, MAX_NOTIFICATIONS};
 
 impl WorkspaceState {
     pub fn push_notification(
         &mut self,
-        koma_id: impl Into<String>,
+        koma_id: KomaId,
         title: impl Into<String>,
         body: impl Into<String>,
     ) -> NotificationEntry {
@@ -11,7 +11,7 @@ impl WorkspaceState {
         self.next_notification_seq += 1;
         let entry = NotificationEntry {
             id,
-            koma_id: koma_id.into(),
+            koma_id,
             title: title.into(),
             body: body.into(),
             unread: true,
@@ -35,7 +35,7 @@ impl WorkspaceState {
         Ok(())
     }
 
-    pub fn focus_notification_source(&mut self, id: Option<&str>) -> Result<String, String> {
+    pub fn focus_notification_source(&mut self, id: Option<&str>) -> Result<KomaId, String> {
         if self.notifications.is_empty() {
             return Err("No notifications".into());
         }
@@ -73,7 +73,7 @@ mod tests {
     #[test]
     fn notifications_track_unread_and_focus_source_across_sheets() {
         let mut state = WorkspaceState::poc_default();
-        let n1 = state.push_notification("sheet2-term", "Build", "Done");
+        let n1 = state.push_notification("sheet2-term".into(), "Build", "Done");
         assert_eq!(state.unread_notification_count(), 1);
 
         state.mark_notification_read(&n1.id, false).unwrap();
@@ -82,9 +82,9 @@ mod tests {
         assert_eq!(state.unread_notification_count(), 1);
 
         let focused = state.focus_notification_source(Some(&n1.id)).unwrap();
-        assert_eq!(focused, "sheet2-term");
+        assert_eq!(focused.as_str(), "sheet2-term");
         assert_eq!(state.active_sheet, 1);
-        assert_eq!(state.focused_koma().unwrap().id, "sheet2-term");
+        assert_eq!(state.focused_koma().unwrap().id, focused);
         assert_eq!(state.unread_notification_count(), 0);
     }
 }

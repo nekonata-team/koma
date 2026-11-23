@@ -1,11 +1,11 @@
-use super::{step_index, KomaKind, KomaMeta, WorkspaceState, DEFAULT_KOMA_WIDTH};
+use super::{step_index, KomaId, KomaKind, KomaMeta, WorkspaceState, DEFAULT_KOMA_WIDTH};
 
 impl WorkspaceState {
     pub fn stow_focused_koma_to_drawer(&mut self) -> Result<KomaMeta, String> {
         let mut koma = self
             .remove_focused_koma()
             .ok_or_else(|| "No focused koma to stow".to_string())?;
-        koma.sheet_id = "drawer".into();
+        koma.sheet_id = None;
         self.drawer.push(koma.clone());
         self.drawer_selected = self.drawer.len() - 1;
         Ok(koma)
@@ -22,7 +22,7 @@ impl WorkspaceState {
         let id = self.allocate_koma_id();
         let item = KomaMeta {
             id,
-            sheet_id: "drawer".into(),
+            sheet_id: None,
             profile_id: self.profile_id.clone(),
             kind,
             label,
@@ -39,7 +39,7 @@ impl WorkspaceState {
         item
     }
 
-    pub fn place_drawer_item(&mut self, id: Option<&str>) -> Result<KomaMeta, String> {
+    pub fn place_drawer_item(&mut self, id: Option<&KomaId>) -> Result<KomaMeta, String> {
         let idx = self.resolve_drawer_index(id)?;
         let mut koma = self.drawer.remove(idx);
         self.clamp_drawer_selection();
@@ -48,14 +48,14 @@ impl WorkspaceState {
             .focused_index()
             .map(|i| (i + 1).min(sheet.komas.len()))
             .unwrap_or(0);
-        koma.sheet_id = sheet.id.clone();
+        koma.sheet_id = Some(sheet.id.clone());
         sheet.komas.insert(insert_idx, koma.clone());
         sheet.focused_koma_id = Some(koma.id.clone());
         self.drawer_open = false;
         Ok(koma)
     }
 
-    pub fn discard_drawer_item(&mut self, id: Option<&str>) -> Result<KomaMeta, String> {
+    pub fn discard_drawer_item(&mut self, id: Option<&KomaId>) -> Result<KomaMeta, String> {
         let idx = self.resolve_drawer_index(id)?;
         let item = self.drawer.remove(idx);
         self.clamp_drawer_selection();
@@ -77,7 +77,7 @@ impl WorkspaceState {
         self.drawer_selected = step_index(self.drawer_selected, self.drawer.len(), delta);
     }
 
-    fn resolve_drawer_index(&self, id: Option<&str>) -> Result<usize, String> {
+    fn resolve_drawer_index(&self, id: Option<&KomaId>) -> Result<usize, String> {
         if self.drawer.is_empty() {
             return Err("Drawer is empty".into());
         }
@@ -85,7 +85,7 @@ impl WorkspaceState {
             Some(target) => self
                 .drawer
                 .iter()
-                .position(|b| b.id == target)
+                .position(|b| &b.id == target)
                 .ok_or_else(|| format!("Drawer item not found: {target}")),
             None => Ok(self.drawer_selected.min(self.drawer.len() - 1)),
         }
@@ -108,7 +108,8 @@ mod tests {
     fn drawer_lifecycle_stows_keeps_places_discards_and_restores() {
         let mut state = WorkspaceState::poc_default();
         let stowed = state.stow_focused_koma_to_drawer().unwrap();
-        assert_eq!(stowed.id, "sheet1-term");
+        assert_eq!(stowed.id.as_str(), "sheet1-term");
+        assert_eq!(stowed.sheet_id, None);
         assert_eq!(state.drawer.len(), 1);
         assert_eq!(state.sheets[0].komas.len(), 1);
 
@@ -119,6 +120,7 @@ mod tests {
             None,
             false,
         );
+        assert_eq!(kept.sheet_id, None);
         assert_eq!(state.drawer.len(), 2);
 
         let discarded = state.discard_drawer_item(Some(&kept.id)).unwrap();
@@ -132,7 +134,8 @@ mod tests {
 
         state.switch_sheet(1);
         let placed = state.place_drawer_item(Some(&stowed.id)).unwrap();
-        assert_eq!(placed.sheet_id, "sheet-2");
+        assert_eq!(placed.id, stowed.id);
+        assert_eq!(placed.sheet_id.as_ref(), Some(&state.current_sheet().id));
         assert_eq!(state.focused_koma().unwrap().id, stowed.id);
         assert_eq!(state.drawer.len(), 1);
     }

@@ -12,7 +12,7 @@ use koma_app::domain::router::{
 use koma_app::domain::sheet_presets::available_sheet_presets;
 use koma_app::persistence;
 use koma_core::input::{derive_url_label, KomaInput};
-use koma_core::model::{InputMode, KomaKind, KomaMeta, WorkspaceState};
+use koma_core::model::{InputMode, KomaId, KomaKind, KomaMeta, SheetId, WorkspaceState};
 use makepad_app_terminal::widget::MpTermAction;
 use makepad_widgets::*;
 
@@ -197,9 +197,9 @@ script_mod! {
 enum PromptMode {
     OpenKoma,
     SaveSheetPreset,
-    EditKomaUrl(String),
-    RenameKoma(String),
-    RenameSheet(String),
+    EditKomaUrl(KomaId),
+    RenameKoma(KomaId),
+    RenameSheet(SheetId),
     NewProfile,
     SwitchProfile,
 }
@@ -370,7 +370,7 @@ impl App {
             return;
         }
         let focused_id = self.state.focused_koma().map(|b| b.id.clone());
-        if !strip.focus_koma(cx, focused_id.as_deref()) {
+        if !strip.focus_koma(cx, focused_id.as_ref()) {
             self.pending_focus_sync = true;
             cx.new_next_frame();
         }
@@ -398,7 +398,7 @@ impl App {
     pub(super) fn place_drawer_item(
         &mut self,
         cx: &mut Cx,
-        id: Option<&str>,
+        id: Option<&KomaId>,
     ) -> Result<KomaMeta, String> {
         let koma = self.state.place_drawer_item(id)?;
         self.state.mode = InputMode::ContentInput;
@@ -409,7 +409,7 @@ impl App {
     pub(super) fn discard_drawer_item(
         &mut self,
         cx: &mut Cx,
-        id: Option<&str>,
+        id: Option<&KomaId>,
     ) -> Result<KomaMeta, String> {
         let item = self.state.discard_drawer_item(id)?;
         if let Some(mut strip) = self
@@ -613,7 +613,12 @@ impl App {
         let _ = self.close_koma_by_id(cx, &id, prefer_left);
     }
 
-    fn close_koma_by_id(&mut self, cx: &mut Cx, id: &str, prefer_left: bool) -> Result<(), String> {
+    fn close_koma_by_id(
+        &mut self,
+        cx: &mut Cx,
+        id: &KomaId,
+        prefer_left: bool,
+    ) -> Result<(), String> {
         let removed = self
             .state
             .close_koma(id, prefer_left)
@@ -636,7 +641,7 @@ impl App {
         self.show_toast(cx, format!("Reopened {}", koma.label));
     }
 
-    fn focused_web_id(&self) -> Option<String> {
+    fn focused_web_id(&self) -> Option<KomaId> {
         self.state
             .focused_koma()
             .filter(|b| b.kind == KomaKind::Web)

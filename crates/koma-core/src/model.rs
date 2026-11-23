@@ -1,8 +1,11 @@
 //! Core Koma domain model (UI- and Makepad-independent).
 
 mod drawer;
+mod ids;
 mod notifications;
 mod sheet_presets;
+
+pub use ids::{KomaId, SheetId};
 
 pub const DEFAULT_KOMA_WIDTH: f64 = 640.0;
 pub const MIN_KOMA_WIDTH: f64 = 320.0;
@@ -50,8 +53,9 @@ pub enum InputMode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct KomaMeta {
-    pub id: String,
-    pub sheet_id: String,
+    pub id: KomaId,
+    /// Absent while the Koma is in the Drawer.
+    pub sheet_id: Option<SheetId>,
     pub profile_id: String,
     pub kind: KomaKind,
     pub label: String,
@@ -71,7 +75,7 @@ pub struct KomaMeta {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NotificationEntry {
     pub id: String,
-    pub koma_id: String,
+    pub koma_id: KomaId,
     pub title: String,
     pub body: String,
     pub unread: bool,
@@ -89,9 +93,9 @@ impl KomaMeta {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SheetState {
-    pub id: String,
+    pub id: SheetId,
     pub label: String,
-    pub focused_koma_id: Option<String>,
+    pub focused_koma_id: Option<KomaId>,
     pub komas: Vec<KomaMeta>,
 }
 
@@ -232,7 +236,7 @@ impl WorkspaceState {
                     komas: vec![
                         KomaMeta {
                             id: "sheet1-term".into(),
-                            sheet_id: "sheet-1".into(),
+                            sheet_id: Some("sheet-1".into()),
                             profile_id: profile_id.clone(),
                             kind: KomaKind::Terminal,
                             label: "Shell 1".into(),
@@ -246,7 +250,7 @@ impl WorkspaceState {
                         },
                         KomaMeta {
                             id: "sheet1-web".into(),
-                            sheet_id: "sheet-1".into(),
+                            sheet_id: Some("sheet-1".into()),
                             profile_id: profile_id.clone(),
                             kind: KomaKind::Web,
                             label: "Makepad".into(),
@@ -267,7 +271,7 @@ impl WorkspaceState {
                     komas: vec![
                         KomaMeta {
                             id: "sheet2-term".into(),
-                            sheet_id: "sheet-2".into(),
+                            sheet_id: Some("sheet-2".into()),
                             profile_id: profile_id.clone(),
                             kind: KomaKind::Terminal,
                             label: "Shell 2".into(),
@@ -281,7 +285,7 @@ impl WorkspaceState {
                         },
                         KomaMeta {
                             id: "sheet2-web".into(),
-                            sheet_id: "sheet-2".into(),
+                            sheet_id: Some("sheet-2".into()),
                             profile_id,
                             kind: KomaKind::Web,
                             label: "Example".into(),
@@ -344,19 +348,19 @@ impl WorkspaceState {
         true
     }
 
-    pub fn focus_koma_by_id(&mut self, koma_id: &str) -> bool {
+    pub fn focus_koma_by_id(&mut self, koma_id: &KomaId) -> bool {
         let Some((sheet_idx, _)) = self
             .sheets
             .iter()
             .enumerate()
-            .find(|(_, d)| d.komas.iter().any(|b| b.id == koma_id))
+            .find(|(_, d)| d.komas.iter().any(|b| &b.id == koma_id))
         else {
             return false;
         };
         let changed = self.active_sheet != sheet_idx
-            || self.sheets[sheet_idx].focused_koma_id.as_deref() != Some(koma_id);
+            || self.sheets[sheet_idx].focused_koma_id.as_ref() != Some(koma_id);
         self.active_sheet = sheet_idx;
-        self.sheets[sheet_idx].focused_koma_id = Some(koma_id.to_string());
+        self.sheets[sheet_idx].focused_koma_id = Some(koma_id.clone());
         changed
     }
 
@@ -368,7 +372,7 @@ impl WorkspaceState {
         let max_idx = sheet.komas.len().saturating_sub(1) as isize;
         let next_idx = (cur_idx as isize + delta).clamp(0, max_idx) as usize;
         let next_id = sheet.komas[next_idx].id.clone();
-        if sheet.focused_koma_id.as_deref() == Some(next_id.as_str()) && next_idx == cur_idx {
+        if sheet.focused_koma_id.as_ref() == Some(&next_id) && next_idx == cur_idx {
             return false;
         }
         sheet.focused_koma_id = Some(next_id);
@@ -409,7 +413,7 @@ impl WorkspaceState {
 
     pub fn move_koma_to_position(
         &mut self,
-        koma_id: &str,
+        koma_id: &KomaId,
         target_sheet_idx: usize,
         target_index: usize,
     ) -> bool {
@@ -418,7 +422,7 @@ impl WorkspaceState {
 
     pub fn move_koma_without_focusing(
         &mut self,
-        koma_id: &str,
+        koma_id: &KomaId,
         target_sheet_idx: usize,
         target_index: usize,
     ) -> bool {
@@ -427,7 +431,7 @@ impl WorkspaceState {
 
     fn place_koma(
         &mut self,
-        koma_id: &str,
+        koma_id: &KomaId,
         target_sheet_idx: usize,
         target_index: usize,
         focus_moved: bool,
@@ -438,7 +442,7 @@ impl WorkspaceState {
         let Some((src_sheet_idx, src_idx)) = self.sheets.iter().enumerate().find_map(|(di, d)| {
             d.komas
                 .iter()
-                .position(|b| b.id == koma_id)
+                .position(|b| &b.id == koma_id)
                 .map(|bi| (di, bi))
         }) else {
             return false;
@@ -454,8 +458,8 @@ impl WorkspaceState {
             }
             if src_idx == adjusted && self.active_sheet == target_sheet_idx {
                 let changed =
-                    self.sheets[target_sheet_idx].focused_koma_id.as_deref() != Some(koma_id);
-                self.sheets[target_sheet_idx].focused_koma_id = Some(koma_id.to_string());
+                    self.sheets[target_sheet_idx].focused_koma_id.as_ref() != Some(koma_id);
+                self.sheets[target_sheet_idx].focused_koma_id = Some(koma_id.clone());
                 return changed;
             }
         }
@@ -463,7 +467,7 @@ impl WorkspaceState {
         let src_sheet = &mut self.sheets[src_sheet_idx];
         let mut koma = src_sheet.komas.remove(src_idx);
         if src_sheet_idx != target_sheet_idx
-            && (focus_moved || src_sheet.focused_koma_id.as_deref() == Some(koma_id))
+            && (focus_moved || src_sheet.focused_koma_id.as_ref() == Some(koma_id))
         {
             src_sheet.focused_koma_id = if src_sheet.komas.is_empty() {
                 None
@@ -475,11 +479,11 @@ impl WorkspaceState {
 
         let target_sheet = &mut self.sheets[target_sheet_idx];
         let target_was_empty = src_sheet_idx != target_sheet_idx && target_sheet.komas.is_empty();
-        koma.sheet_id = target_sheet.id.clone();
+        koma.sheet_id = Some(target_sheet.id.clone());
         let clamped = adjusted.min(target_sheet.komas.len());
         target_sheet.komas.insert(clamped, koma);
         if focus_moved || target_was_empty {
-            target_sheet.focused_koma_id = Some(koma_id.to_string());
+            target_sheet.focused_koma_id = Some(koma_id.clone());
         }
         if focus_moved {
             self.active_sheet = target_sheet_idx;
@@ -487,7 +491,7 @@ impl WorkspaceState {
         true
     }
 
-    pub fn set_koma_width(&mut self, koma_id: &str, width: f64) -> Result<f64, String> {
+    pub fn set_koma_width(&mut self, koma_id: &KomaId, width: f64) -> Result<f64, String> {
         if !width.is_finite() || width <= 0.0 {
             return Err("Koma width must be finite and positive".into());
         }
@@ -549,13 +553,13 @@ impl WorkspaceState {
         true
     }
 
-    pub fn rename_koma(&mut self, koma_id: &str, name: &str) -> Result<String, String> {
+    pub fn rename_koma(&mut self, koma_id: &KomaId, name: &str) -> Result<String, String> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
             return Err("Koma name cannot be empty".into());
         }
         for sheet in &mut self.sheets {
-            if let Some(koma) = sheet.komas.iter_mut().find(|b| b.id == koma_id) {
+            if let Some(koma) = sheet.komas.iter_mut().find(|b| &b.id == koma_id) {
                 koma.label = trimmed.to_string();
                 return Ok(koma.label.clone());
             }
@@ -563,12 +567,12 @@ impl WorkspaceState {
         Err(format!("Koma not found: {koma_id}"))
     }
 
-    pub fn rename_sheet(&mut self, sheet_id: &str, name: &str) -> Result<String, String> {
+    pub fn rename_sheet(&mut self, sheet_id: &SheetId, name: &str) -> Result<String, String> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
             return Err("Sheet name cannot be empty".into());
         }
-        let Some(sheet) = self.sheets.iter_mut().find(|d| d.id == sheet_id) else {
+        let Some(sheet) = self.sheets.iter_mut().find(|d| &d.id == sheet_id) else {
             return Err(format!("Sheet not found: {sheet_id}"));
         };
         sheet.label = trimmed.to_string();
@@ -621,7 +625,7 @@ impl WorkspaceState {
             .unwrap_or(0);
         let koma = KomaMeta {
             id: id.clone(),
-            sheet_id: sheet.id.clone(),
+            sheet_id: Some(sheet.id.clone()),
             profile_id,
             kind,
             label,
@@ -721,7 +725,7 @@ impl WorkspaceState {
         self.remove_koma_by_id(&id)
     }
 
-    pub fn close_koma(&mut self, id: &str, prefer_left: bool) -> Option<KomaMeta> {
+    pub fn close_koma(&mut self, id: &KomaId, prefer_left: bool) -> Option<KomaMeta> {
         let (index, koma) = self.take_koma(id, prefer_left)?;
         if self.closed_komas.len() == MAX_CLOSED_KOMAS {
             self.closed_komas.remove(0);
@@ -735,7 +739,7 @@ impl WorkspaceState {
         let origin = self
             .sheets
             .iter()
-            .position(|sheet| sheet.id == koma.sheet_id);
+            .position(|sheet| Some(&sheet.id) == koma.sheet_id.as_ref());
         self.active_sheet = origin.unwrap_or(self.active_sheet);
         let sheet = self.current_sheet_mut();
         let index = if origin.is_some() {
@@ -743,7 +747,7 @@ impl WorkspaceState {
         } else {
             sheet.focused_index().map_or(0, |index| index + 1)
         };
-        koma.sheet_id.clone_from(&sheet.id);
+        koma.sheet_id = Some(sheet.id.clone());
         if koma.kind == KomaKind::Terminal {
             koma.command = None;
         }
@@ -752,15 +756,15 @@ impl WorkspaceState {
         Some(koma)
     }
 
-    pub fn remove_koma_by_id(&mut self, koma_id: &str) -> Option<KomaMeta> {
+    pub fn remove_koma_by_id(&mut self, koma_id: &KomaId) -> Option<KomaMeta> {
         self.take_koma(koma_id, false).map(|(_, koma)| koma)
     }
 
-    fn take_koma(&mut self, koma_id: &str, prefer_left: bool) -> Option<(usize, KomaMeta)> {
+    fn take_koma(&mut self, koma_id: &KomaId, prefer_left: bool) -> Option<(usize, KomaMeta)> {
         for sheet in &mut self.sheets {
-            if let Some(idx) = sheet.komas.iter().position(|b| b.id == koma_id) {
+            if let Some(idx) = sheet.komas.iter().position(|b| &b.id == koma_id) {
                 let removed = sheet.komas.remove(idx);
-                if sheet.focused_koma_id.as_deref() == Some(koma_id) {
+                if sheet.focused_koma_id.as_ref() == Some(koma_id) {
                     sheet.focused_koma_id = if sheet.komas.is_empty() {
                         None
                     } else {
@@ -805,7 +809,7 @@ impl WorkspaceState {
             focused_koma_id = Some(koma_id.clone());
             komas.push(KomaMeta {
                 id: koma_id,
-                sheet_id: sheet_id.clone(),
+                sheet_id: Some(sheet_id.clone()),
                 profile_id: self.profile_id.clone(),
                 kind: KomaKind::Terminal,
                 label: "Shell".into(),
@@ -863,7 +867,12 @@ impl WorkspaceState {
         self.recents.truncate(MAX_RECENTS);
     }
 
-    pub fn update_koma_url(&mut self, koma_id: &str, url: String, label: Option<String>) -> bool {
+    pub fn update_koma_url(
+        &mut self,
+        koma_id: &KomaId,
+        url: String,
+        label: Option<String>,
+    ) -> bool {
         let Some(koma) = self.koma_by_id_mut(koma_id) else {
             return false;
         };
@@ -883,7 +892,7 @@ impl WorkspaceState {
 
     pub fn update_terminal_metadata(
         &mut self,
-        id: &str,
+        id: &KomaId,
         label: Option<String>,
         cwd: Option<String>,
     ) -> bool {
@@ -892,7 +901,7 @@ impl WorkspaceState {
             .iter_mut()
             .flat_map(|sheet| &mut sheet.komas)
             .chain(&mut self.drawer)
-            .find(|koma| koma.id == id && koma.kind == KomaKind::Terminal)
+            .find(|koma| &koma.id == id && koma.kind == KomaKind::Terminal)
         else {
             return false;
         };
@@ -909,24 +918,24 @@ impl WorkspaceState {
         changed
     }
 
-    pub fn koma_by_id(&self, id: &str) -> Option<&KomaMeta> {
+    pub fn koma_by_id(&self, id: &KomaId) -> Option<&KomaMeta> {
         self.sheets
             .iter()
             .flat_map(|d| d.komas.iter())
-            .find(|b| b.id == id)
+            .find(|b| &b.id == id)
     }
 
-    pub fn set_koma_api_enabled(&mut self, id: &str, enabled: bool) {
+    pub fn set_koma_api_enabled(&mut self, id: &KomaId, enabled: bool) {
         if let Some(koma) = self.koma_by_id_mut(id).filter(|b| b.kind == KomaKind::Web) {
             koma.koma_api_enabled = enabled;
         }
     }
 
-    fn koma_by_id_mut(&mut self, id: &str) -> Option<&mut KomaMeta> {
+    fn koma_by_id_mut(&mut self, id: &KomaId) -> Option<&mut KomaMeta> {
         self.sheets
             .iter_mut()
             .flat_map(|d| d.komas.iter_mut())
-            .find(|b| b.id == id)
+            .find(|b| &b.id == id)
     }
 
     pub fn sheet_web_koma(&self, sheet_idx: usize) -> Option<&KomaMeta> {
@@ -948,8 +957,8 @@ impl WorkspaceState {
     /// Resolves a target Koma using explicit ID, ambient `KOMA_KOMA_ID`, or active Sheet.
     pub fn resolve_koma(
         &self,
-        explicit_koma_id: Option<&str>,
-        caller_koma_id: Option<&str>,
+        explicit_koma_id: Option<&KomaId>,
+        caller_koma_id: Option<&KomaId>,
         target_kind: KomaKind,
     ) -> Result<&KomaMeta, String> {
         if let Some(id) = explicit_koma_id {
@@ -970,13 +979,13 @@ impl WorkspaceState {
             if let Some(sheet) = self
                 .sheets
                 .iter()
-                .find(|d| d.komas.iter().any(|b| b.id == caller_id))
+                .find(|d| d.komas.iter().any(|b| &b.id == caller_id))
             {
                 if target_kind == KomaKind::Terminal {
                     if let Some(caller) = sheet
                         .komas
                         .iter()
-                        .find(|b| b.id == caller_id && b.kind == KomaKind::Terminal)
+                        .find(|b| &b.id == caller_id && b.kind == KomaKind::Terminal)
                     {
                         return Ok(caller);
                     }
@@ -988,9 +997,9 @@ impl WorkspaceState {
         resolve_in_sheet(self.current_sheet(), target_kind)
     }
 
-    fn allocate_koma_id(&mut self) -> String {
+    fn allocate_koma_id(&mut self) -> KomaId {
         loop {
-            let candidate = format!("koma-{}", self.next_koma_seq);
+            let candidate = KomaId::from(format!("koma-{}", self.next_koma_seq));
             self.next_koma_seq += 1;
             let used = self.koma_by_id(&candidate).is_some()
                 || self.drawer.iter().any(|b| b.id == candidate)
@@ -1001,11 +1010,11 @@ impl WorkspaceState {
         }
     }
 
-    fn allocate_sheet_identity(&mut self) -> (String, String) {
+    fn allocate_sheet_identity(&mut self) -> (SheetId, String) {
         loop {
             let seq = self.next_sheet_seq;
             self.next_sheet_seq += 1;
-            let id = format!("sheet-{seq}");
+            let id = SheetId::from(format!("sheet-{seq}"));
             if self.sheets.iter().all(|d| d.id != id) {
                 return (id, format!("Sheet {seq}"));
             }
@@ -1049,7 +1058,7 @@ mod tests {
         term.command = Some("example-command".into());
         state.close_koma(web, false).unwrap();
         state.close_koma(terminal, false).unwrap();
-        state.remove_koma_by_id("sheet2-term").unwrap();
+        state.remove_koma_by_id(&"sheet2-term".into()).unwrap();
         state.switch_sheet(1);
 
         let restored = state.reopen_closed_koma().unwrap();
@@ -1074,7 +1083,7 @@ mod tests {
         let target = state.current_sheet().id.clone();
         let focused_id = state.focused_koma().unwrap().id.clone();
         let restored = state.reopen_closed_koma().unwrap();
-        assert_eq!(restored.sheet_id, target);
+        assert_eq!(restored.sheet_id, Some(target));
         assert_eq!(state.current_sheet().komas[0].id, focused_id);
         assert_eq!(state.current_sheet().komas[1].id, id);
         assert_eq!(state.focused_koma(), Some(&restored));
@@ -1101,23 +1110,26 @@ mod tests {
         let state = WorkspaceState::poc_default();
         assert_eq!(
             state
-                .resolve_koma(None, Some("sheet1-term"), KomaKind::Web)
+                .resolve_koma(None, Some(&"sheet1-term".into()), KomaKind::Web)
                 .unwrap()
-                .id,
+                .id
+                .as_str(),
             "sheet1-web"
         );
         assert_eq!(
             state
-                .resolve_koma(None, Some("sheet2-term"), KomaKind::Web)
+                .resolve_koma(None, Some(&"sheet2-term".into()), KomaKind::Web)
                 .unwrap()
-                .id,
+                .id
+                .as_str(),
             "sheet2-web"
         );
         assert_eq!(
             state
-                .resolve_koma(None, Some("sheet2-term"), KomaKind::Terminal)
+                .resolve_koma(None, Some(&"sheet2-term".into()), KomaKind::Terminal)
                 .unwrap()
-                .id,
+                .id
+                .as_str(),
             "sheet2-term"
         );
     }
@@ -1127,23 +1139,36 @@ mod tests {
         let state = WorkspaceState::poc_default();
         assert_eq!(
             state
-                .resolve_koma(Some("sheet2-web"), Some("sheet1-term"), KomaKind::Web)
+                .resolve_koma(
+                    Some(&"sheet2-web".into()),
+                    Some(&"sheet1-term".into()),
+                    KomaKind::Web
+                )
                 .unwrap()
-                .id,
+                .id
+                .as_str(),
             "sheet2-web"
         );
         assert!(state
-            .resolve_koma(Some("missing"), Some("sheet1-term"), KomaKind::Web)
+            .resolve_koma(
+                Some(&"missing".into()),
+                Some(&"sheet1-term".into()),
+                KomaKind::Web
+            )
             .is_err());
         assert!(state
-            .resolve_koma(Some("sheet1-term"), Some("sheet1-term"), KomaKind::Web)
+            .resolve_koma(
+                Some(&"sheet1-term".into()),
+                Some(&"sheet1-term".into()),
+                KomaKind::Web
+            )
             .is_err());
     }
 
     #[test]
     fn koma_insertion_focus_reorder_resize_and_removal_update_sheet() {
         let mut state = WorkspaceState::poc_default();
-        assert_eq!(state.focused_koma().unwrap().id, "sheet1-term");
+        assert_eq!(state.focused_koma().unwrap().id.as_str(), "sheet1-term");
 
         let created = state.insert_koma_after_focused(
             KomaKind::Web,
@@ -1180,22 +1205,22 @@ mod tests {
 
         let removed = state.remove_focused_koma().unwrap();
         assert_eq!(removed.id, created.id);
-        assert_eq!(state.focused_koma().unwrap().id, "sheet1-web");
+        assert_eq!(state.focused_koma().unwrap().id.as_str(), "sheet1-web");
 
         assert!(state.focus_relative_koma(-1));
-        assert_eq!(state.focused_koma().unwrap().id, "sheet1-term");
+        assert_eq!(state.focused_koma().unwrap().id.as_str(), "sheet1-term");
 
         // Removing a koma on an inactive sheet updates that sheet without altering active focus.
         let sheet2_before = state.sheets[1].komas.len();
-        let inactive = state.remove_koma_by_id("sheet2-term").unwrap();
-        assert_eq!(inactive.id, "sheet2-term");
+        let inactive = state.remove_koma_by_id(&"sheet2-term".into()).unwrap();
+        assert_eq!(inactive.id.as_str(), "sheet2-term");
         assert_eq!(state.sheets[1].komas.len(), sheet2_before - 1);
         assert_ne!(
-            state.sheets[1].focused_koma_id.as_deref(),
+            state.sheets[1].focused_koma_id.as_ref().map(KomaId::as_str),
             Some("sheet2-term")
         );
-        assert_eq!(state.focused_koma().unwrap().id, "sheet1-term");
-        assert!(state.remove_koma_by_id("sheet2-term").is_none());
+        assert_eq!(state.focused_koma().unwrap().id.as_str(), "sheet1-term");
+        assert!(state.remove_koma_by_id(&"sheet2-term".into()).is_none());
 
         // Closing with prefer-left focuses the left neighbor when one exists.
         let right = state.insert_koma_after_focused(KomaKind::Terminal, "Right".into(), None, None);
@@ -1239,15 +1264,20 @@ mod tests {
         assert!(!state.apply_width_preset(&presets, 99));
 
         assert_eq!(
-            state.rename_koma("sheet1-term", "  API Server  ").unwrap(),
+            state
+                .rename_koma(&"sheet1-term".into(), "  API Server  ")
+                .unwrap(),
             "API Server"
         );
         assert_eq!(state.focused_koma().unwrap().label, "API Server");
-        assert!(state.rename_koma("sheet1-term", "   ").is_err());
+        assert!(state.rename_koma(&"sheet1-term".into(), "   ").is_err());
 
-        assert_eq!(state.rename_sheet("sheet-1", "  Work  ").unwrap(), "Work");
+        assert_eq!(
+            state.rename_sheet(&"sheet-1".into(), "  Work  ").unwrap(),
+            "Work"
+        );
         assert_eq!(state.current_sheet().label, "Work");
-        assert!(state.rename_sheet("sheet-1", "").is_err());
+        assert!(state.rename_sheet(&"sheet-1".into(), "").is_err());
     }
 
     #[test]
@@ -1283,7 +1313,7 @@ mod tests {
             vec!["sheet1-web"]
         );
         assert_eq!(
-            state.sheets[0].focused_koma_id.as_deref(),
+            state.sheets[0].focused_koma_id.as_ref().map(KomaId::as_str),
             Some("sheet1-web")
         );
         assert_eq!(
@@ -1294,11 +1324,14 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["sheet2-term", "sheet1-term", "sheet2-web"]
         );
-        assert_eq!(state.focused_koma().unwrap().id, "sheet1-term");
-        assert_eq!(state.focused_koma().unwrap().sheet_id, "sheet-2");
+        assert_eq!(state.focused_koma().unwrap().id.as_str(), "sheet1-term");
+        assert_eq!(
+            state.focused_koma().unwrap().sheet_id.as_ref(),
+            Some(&state.current_sheet().id)
+        );
 
         // Same-sheet reorder via drop gap index.
-        assert!(state.move_koma_to_position("sheet1-term", 1, 3));
+        assert!(state.move_koma_to_position(&"sheet1-term".into(), 1, 3));
         assert_eq!(
             state.sheets[1]
                 .komas
@@ -1309,10 +1342,10 @@ mod tests {
         );
 
         // Move last koma out of Sheet 1 leaving it empty.
-        assert!(state.move_koma_to_position("sheet1-web", 1, 0));
+        assert!(state.move_koma_to_position(&"sheet1-web".into(), 1, 0));
         assert!(state.sheets[0].komas.is_empty());
         assert_eq!(state.sheets[0].focused_koma_id, None);
-        assert!(!state.move_koma_to_position("sheet1-web", 99, 0));
+        assert!(!state.move_koma_to_position(&"sheet1-web".into(), 99, 0));
     }
 
     #[test]
@@ -1346,7 +1379,7 @@ mod tests {
         let mut multi = WorkspaceState::poc_default();
         multi.active_sheet = 1;
         let removed = multi.remove_current_sheet().unwrap();
-        assert_eq!(removed.id, "sheet-2");
+        assert_eq!(removed.id.as_str(), "sheet-2");
         assert_eq!(multi.sheets.len(), 1);
         assert_eq!(multi.active_sheet, 0);
     }

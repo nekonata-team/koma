@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use koma_core::model::KomaId;
 use koma_ipc::protocol::{
     IpcPayload, IpcResponse, WebReadData, WebScriptTargetData, WebSnapshotData,
 };
@@ -19,7 +20,7 @@ const SCRIPT_TARGET_WAIT: Duration = Duration::from_secs(8);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WebNavEvent {
-    pub koma_id: String,
+    pub koma_id: KomaId,
     pub action: String,
     pub url: Option<String>,
 }
@@ -27,11 +28,11 @@ pub struct WebNavEvent {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KomaApiEvent {
     FocusKoma {
-        caller_koma_id: String,
-        target_koma_id: String,
+        caller_koma_id: KomaId,
+        target_koma_id: KomaId,
     },
     ShowToast {
-        caller_koma_id: String,
+        caller_koma_id: KomaId,
         message: String,
         severity: String,
     },
@@ -39,23 +40,23 @@ pub enum KomaApiEvent {
 
 enum PendingEval {
     Raw {
-        koma_id: String,
+        koma_id: KomaId,
         reply: mpsc::SyncSender<IpcResponse>,
     },
     Snapshot {
-        koma_id: String,
+        koma_id: KomaId,
         reply: mpsc::SyncSender<IpcResponse>,
     },
     Read {
-        koma_id: String,
+        koma_id: KomaId,
         reply: mpsc::SyncSender<IpcResponse>,
     },
     Text {
-        koma_id: String,
+        koma_id: KomaId,
         reply: mpsc::SyncSender<IpcResponse>,
     },
     Action {
-        koma_id: String,
+        koma_id: KomaId,
         reply: mpsc::SyncSender<IpcResponse>,
     },
 }
@@ -174,28 +175,28 @@ pub fn should_record_url_change(last: Option<&str>, next: &str) -> bool {
 }
 
 struct PendingScriptTarget {
-    koma_id: String,
+    koma_id: KomaId,
     started: Instant,
     reply: mpsc::SyncSender<IpcResponse>,
 }
 
 pub struct WebViewRuntime {
     views: BrowserViews,
-    koma_to_view: HashMap<String, ViewId>,
-    view_to_koma: HashMap<ViewId, String>,
-    koma_sizes: HashMap<String, (Vec2d, f64)>,
-    koma_hidden: HashMap<String, bool>,
-    focused_koma: Option<String>,
+    koma_to_view: HashMap<KomaId, ViewId>,
+    view_to_koma: HashMap<ViewId, KomaId>,
+    koma_sizes: HashMap<KomaId, (Vec2d, f64)>,
+    koma_hidden: HashMap<KomaId, bool>,
+    focused_koma: Option<KomaId>,
     pending_evals: HashMap<u64, PendingEval>,
     pending_script_targets: Vec<PendingScriptTarget>,
     pending_popups: Vec<String>,
-    koma_api_enabled: HashMap<String, bool>,
-    koma_api_injected_url: HashMap<String, String>,
+    koma_api_enabled: HashMap<KomaId, bool>,
+    koma_api_injected_url: HashMap<KomaId, String>,
     pending_koma_api: Vec<KomaApiEvent>,
-    web_nav_injected_url: HashMap<String, String>,
+    web_nav_injected_url: HashMap<KomaId, String>,
     pending_web_nav: Vec<WebNavEvent>,
-    last_observed_url: HashMap<String, String>,
-    pending_url_changes: Vec<(String, String)>,
+    last_observed_url: HashMap<KomaId, String>,
+    pending_url_changes: Vec<(KomaId, String)>,
     last_size: Option<(Vec2d, f64)>,
     last_event: Option<(u64, bool)>,
 }
@@ -231,7 +232,7 @@ impl WebViewRuntime {
     pub fn open_extra_koma(
         &mut self,
         cx: &mut Cx,
-        koma_id: &str,
+        koma_id: &KomaId,
         url: &str,
     ) -> Result<usize, String> {
         let (size, dpi) = self.last_size.unwrap_or((dvec2(640.0, 680.0), 2.0));
@@ -240,7 +241,7 @@ impl WebViewRuntime {
         Ok(self.koma_to_view.len())
     }
 
-    pub fn commit_text(&mut self, cx: &mut Cx, koma_id: &str, text: &str) -> Result<(), String> {
+    pub fn commit_text(&mut self, cx: &mut Cx, koma_id: &KomaId, text: &str) -> Result<(), String> {
         let id = self
             .koma_to_view
             .get(koma_id)
@@ -261,20 +262,20 @@ impl WebViewRuntime {
         &mut self.views
     }
 
-    pub fn view_id(&self, koma_id: &str) -> Option<ViewId> {
+    pub fn view_id(&self, koma_id: &KomaId) -> Option<ViewId> {
         self.koma_to_view.get(koma_id).copied()
     }
 
     pub fn focused_view_id(&self) -> Option<ViewId> {
         self.focused_koma
-            .as_deref()
+            .as_ref()
             .and_then(|id| self.koma_to_view.get(id).copied())
     }
 
     pub fn ensure_koma(
         &mut self,
         cx: &mut Cx,
-        koma_id: &str,
+        koma_id: &KomaId,
         url: &str,
         visible: bool,
         size: Vec2d,
@@ -284,12 +285,12 @@ impl WebViewRuntime {
             return Some(id);
         }
         let id = self.views.open(url, true, 0xff10_1521)?;
-        self.koma_to_view.insert(koma_id.to_string(), id);
-        self.view_to_koma.insert(id, koma_id.to_string());
-        self.koma_sizes.insert(koma_id.to_string(), (size, dpi));
-        self.koma_hidden.insert(koma_id.to_string(), !visible);
+        self.koma_to_view.insert(koma_id.clone(), id);
+        self.view_to_koma.insert(id, koma_id.clone());
+        self.koma_sizes.insert(koma_id.clone(), (size, dpi));
+        self.koma_hidden.insert(koma_id.clone(), !visible);
         self.last_observed_url
-            .insert(koma_id.to_string(), url.to_string());
+            .insert(koma_id.clone(), url.to_string());
         self.last_size = Some((size, dpi));
         self.views.set_size(id, size, dpi);
         self.views.send(id, ViewOp::Hidden { on: !visible });
@@ -297,9 +298,9 @@ impl WebViewRuntime {
         Some(id)
     }
 
-    pub fn close_koma(&mut self, cx: &mut Cx, koma_id: &str) {
+    pub fn close_koma(&mut self, cx: &mut Cx, koma_id: &KomaId) {
         self.pending_script_targets.retain(|pending| {
-            if pending.koma_id != koma_id {
+            if &pending.koma_id != koma_id {
                 return true;
             }
             let _ = pending
@@ -317,14 +318,14 @@ impl WebViewRuntime {
         self.koma_api_injected_url.remove(koma_id);
         self.web_nav_injected_url.remove(koma_id);
         self.last_observed_url.remove(koma_id);
-        if self.focused_koma.as_deref() == Some(koma_id) {
+        if self.focused_koma.as_ref() == Some(koma_id) {
             self.focused_koma = None;
         }
         self.views.close(id);
         self.views.service(cx);
     }
 
-    fn script_target(&self, koma_id: &str) -> Option<IpcResponse> {
+    fn script_target(&self, koma_id: &KomaId) -> Option<IpcResponse> {
         let state = self.views.state(self.view_id(koma_id)?)?;
         if let Some(error) = &state.error {
             return Some(IpcResponse::err(error));
@@ -341,7 +342,7 @@ impl WebViewRuntime {
     pub fn script_target_for_ipc(
         &mut self,
         cx: &mut Cx,
-        koma_id: String,
+        koma_id: KomaId,
         reply: mpsc::SyncSender<IpcResponse>,
     ) {
         if let Some(response) = self.script_target(&koma_id) {
@@ -356,14 +357,14 @@ impl WebViewRuntime {
         }
     }
 
-    pub fn set_koma_hidden(&mut self, cx: &mut Cx, koma_id: &str, hidden: bool) {
+    pub fn set_koma_hidden(&mut self, cx: &mut Cx, koma_id: &KomaId, hidden: bool) {
         let Some(id) = self.koma_to_view.get(koma_id).copied() else {
             return;
         };
         if self.koma_hidden.get(koma_id).copied() == Some(hidden) {
             return;
         }
-        self.koma_hidden.insert(koma_id.to_string(), hidden);
+        self.koma_hidden.insert(koma_id.clone(), hidden);
         if hidden {
             self.views.send(id, ViewOp::Focus { on: false });
         }
@@ -371,7 +372,7 @@ impl WebViewRuntime {
         self.views.service(cx);
     }
 
-    pub fn set_koma_size(&mut self, cx: &mut Cx, koma_id: &str, size: Vec2d, dpi: f64) {
+    pub fn set_koma_size(&mut self, cx: &mut Cx, koma_id: &KomaId, size: Vec2d, dpi: f64) {
         self.last_size = Some((size, dpi));
         let Some(id) = self.koma_to_view.get(koma_id).copied() else {
             return;
@@ -384,13 +385,13 @@ impl WebViewRuntime {
                 return;
             }
         }
-        self.koma_sizes.insert(koma_id.to_string(), (size, dpi));
+        self.koma_sizes.insert(koma_id.clone(), (size, dpi));
         self.views.set_size(id, size, dpi);
         self.views.service(cx);
     }
 
-    pub fn focus_koma(&mut self, cx: &mut Cx, koma_id: Option<&str>) {
-        if self.focused_koma.as_deref() == koma_id {
+    pub fn focus_koma(&mut self, cx: &mut Cx, koma_id: Option<&KomaId>) {
+        if self.focused_koma.as_ref() == koma_id {
             if let Some(id) = koma_id.and_then(|b| self.koma_to_view.get(b).copied()) {
                 self.views.send(id, ViewOp::Focus { on: true });
                 self.views.service(cx);
@@ -400,14 +401,14 @@ impl WebViewRuntime {
         if let Some(prev_id) = self.focused_view_id() {
             self.views.send(prev_id, ViewOp::Focus { on: false });
         }
-        self.focused_koma = koma_id.map(str::to_string);
+        self.focused_koma = koma_id.cloned();
         if let Some(next_id) = self.focused_view_id() {
             self.views.send(next_id, ViewOp::Focus { on: true });
         }
         self.views.service(cx);
     }
 
-    pub fn navigate(&mut self, cx: &mut Cx, koma_id: &str, url: &str) -> bool {
+    pub fn navigate(&mut self, cx: &mut Cx, koma_id: &KomaId, url: &str) -> bool {
         let Some(id) = self.koma_to_view.get(koma_id).copied() else {
             return false;
         };
@@ -421,7 +422,7 @@ impl WebViewRuntime {
         true
     }
 
-    pub fn reload(&mut self, cx: &mut Cx, koma_id: &str) -> bool {
+    pub fn reload(&mut self, cx: &mut Cx, koma_id: &KomaId) -> bool {
         let Some(id) = self.koma_to_view.get(koma_id).copied() else {
             return false;
         };
@@ -430,7 +431,7 @@ impl WebViewRuntime {
         true
     }
 
-    pub fn go_back(&mut self, cx: &mut Cx, koma_id: &str) -> bool {
+    pub fn go_back(&mut self, cx: &mut Cx, koma_id: &KomaId) -> bool {
         let Some(id) = self.koma_to_view.get(koma_id).copied() else {
             return false;
         };
@@ -439,7 +440,7 @@ impl WebViewRuntime {
         true
     }
 
-    pub fn go_forward(&mut self, cx: &mut Cx, koma_id: &str) -> bool {
+    pub fn go_forward(&mut self, cx: &mut Cx, koma_id: &KomaId) -> bool {
         let Some(id) = self.koma_to_view.get(koma_id).copied() else {
             return false;
         };
@@ -448,14 +449,14 @@ impl WebViewRuntime {
         true
     }
 
-    pub fn koma_frame(&self, koma_id: &str) -> Option<RingShown> {
+    pub fn koma_frame(&self, koma_id: &KomaId) -> Option<RingShown> {
         self.koma_to_view
             .get(koma_id)
             .copied()
             .and_then(|id| self.views.frame(id))
     }
 
-    pub fn koma_url_title(&self, koma_id: &str) -> Option<(String, String)> {
+    pub fn koma_url_title(&self, koma_id: &KomaId) -> Option<(String, String)> {
         let id = self.koma_to_view.get(koma_id).copied()?;
         let state = self.views.state(id)?;
         Some((state.url.clone(), state.title.clone()))
@@ -473,12 +474,12 @@ impl WebViewRuntime {
         std::mem::take(&mut self.pending_web_nav)
     }
 
-    pub fn take_url_changes(&mut self) -> Vec<(String, String)> {
+    pub fn take_url_changes(&mut self) -> Vec<(KomaId, String)> {
         std::mem::take(&mut self.pending_url_changes)
     }
 
-    pub fn set_koma_api_enabled(&mut self, cx: &mut Cx, koma_id: &str, enabled: bool) {
-        self.koma_api_enabled.insert(koma_id.to_string(), enabled);
+    pub fn set_koma_api_enabled(&mut self, cx: &mut Cx, koma_id: &KomaId, enabled: bool) {
+        self.koma_api_enabled.insert(koma_id.clone(), enabled);
         if !enabled {
             self.koma_api_injected_url.remove(koma_id);
             if let Some(id) = self.koma_to_view.get(koma_id).copied() {
@@ -491,9 +492,9 @@ impl WebViewRuntime {
     fn start_ipc_eval(
         &mut self,
         cx: &mut Cx,
-        koma_id: &str,
+        koma_id: &KomaId,
         expr: &str,
-        make_pending: impl FnOnce(String, mpsc::SyncSender<IpcResponse>) -> PendingEval,
+        make_pending: impl FnOnce(KomaId, mpsc::SyncSender<IpcResponse>) -> PendingEval,
         reply: mpsc::SyncSender<IpcResponse>,
     ) {
         let Some(id) = self.koma_to_view.get(koma_id).copied() else {
@@ -502,14 +503,14 @@ impl WebViewRuntime {
         };
         let eval_id = self.views.evaluate(id, expr);
         self.pending_evals
-            .insert(eval_id, make_pending(koma_id.to_string(), reply));
+            .insert(eval_id, make_pending(koma_id.clone(), reply));
         self.views.service(cx);
     }
 
     pub fn eval_for_ipc(
         &mut self,
         cx: &mut Cx,
-        koma_id: &str,
+        koma_id: &KomaId,
         expr: &str,
         reply: mpsc::SyncSender<IpcResponse>,
     ) {
@@ -529,7 +530,7 @@ impl WebViewRuntime {
     pub fn snapshot_for_ipc(
         &mut self,
         cx: &mut Cx,
-        koma_id: &str,
+        koma_id: &KomaId,
         reply: mpsc::SyncSender<IpcResponse>,
     ) {
         let expr = build_koma_snapshot_expr();
@@ -548,7 +549,7 @@ impl WebViewRuntime {
     pub fn read_for_ipc(
         &mut self,
         cx: &mut Cx,
-        koma_id: &str,
+        koma_id: &KomaId,
         within: Option<&str>,
         reply: mpsc::SyncSender<IpcResponse>,
     ) {
@@ -568,7 +569,7 @@ impl WebViewRuntime {
     pub fn text_for_ipc(
         &mut self,
         cx: &mut Cx,
-        koma_id: &str,
+        koma_id: &KomaId,
         reply: mpsc::SyncSender<IpcResponse>,
     ) {
         let expr = build_koma_text_expr();
@@ -587,7 +588,7 @@ impl WebViewRuntime {
     pub fn click_for_ipc(
         &mut self,
         cx: &mut Cx,
-        koma_id: &str,
+        koma_id: &KomaId,
         target: &str,
         reply: mpsc::SyncSender<IpcResponse>,
     ) {
@@ -607,7 +608,7 @@ impl WebViewRuntime {
     pub fn fill_for_ipc(
         &mut self,
         cx: &mut Cx,
-        koma_id: &str,
+        koma_id: &KomaId,
         target: &str,
         text: &str,
         reply: mpsc::SyncSender<IpcResponse>,
@@ -703,7 +704,7 @@ impl WebViewRuntime {
                                         if let Some(target) = msg.koma_id {
                                             self.pending_koma_api.push(KomaApiEvent::FocusKoma {
                                                 caller_koma_id: koma_id.clone(),
-                                                target_koma_id: target,
+                                                target_koma_id: target.into(),
                                             });
                                             changed = true;
                                         }
@@ -736,7 +737,7 @@ impl WebViewRuntime {
                 match (self.pending_evals.remove(&eval_id), result) {
                     (Some(PendingEval::Raw { koma_id, reply }), Ok(val)) => {
                         let _ = reply.send(IpcResponse::Ok(IpcPayload::WebEval {
-                            koma_id,
+                            koma_id: koma_id.into_string(),
                             value: val,
                         }));
                     }
@@ -744,7 +745,7 @@ impl WebViewRuntime {
                         let resp = match SnapshotResult::deserialize_json(&val) {
                             Ok(res) if res.ok => {
                                 IpcResponse::Ok(IpcPayload::WebSnapshot(WebSnapshotData {
-                                    koma_id,
+                                    koma_id: koma_id.into_string(),
                                     snapshot: res.snapshot,
                                 }))
                             }
@@ -759,7 +760,7 @@ impl WebViewRuntime {
                         let resp = match ReadResult::deserialize_json(&val) {
                             Ok(res) if res.ok => {
                                 IpcResponse::Ok(IpcPayload::WebRead(WebReadData {
-                                    koma_id,
+                                    koma_id: koma_id.into_string(),
                                     markdown: res.markdown,
                                     title: res.title,
                                     url: res.url,
@@ -775,7 +776,7 @@ impl WebViewRuntime {
                     (Some(PendingEval::Text { koma_id, reply }), Ok(val)) => {
                         let resp = match TextResult::deserialize_json(&val) {
                             Ok(res) if res.ok => IpcResponse::Ok(IpcPayload::Text {
-                                koma_id,
+                                koma_id: koma_id.into_string(),
                                 text: res.text.unwrap_or_default(),
                             }),
                             Ok(res) => {
@@ -787,7 +788,9 @@ impl WebViewRuntime {
                     }
                     (Some(PendingEval::Action { koma_id, reply }), Ok(val)) => {
                         let resp = match ActionResult::deserialize_json(&val) {
-                            Ok(res) if res.ok => IpcResponse::Ok(IpcPayload::KomaId { koma_id }),
+                            Ok(res) if res.ok => IpcResponse::Ok(IpcPayload::KomaId {
+                                koma_id: koma_id.into_string(),
+                            }),
                             Ok(res) => IpcResponse::err(
                                 res.error.unwrap_or_else(|| "Action failed".into()),
                             ),
@@ -860,12 +863,12 @@ impl WebViewRuntime {
         self.pending_web_nav.clear();
     }
 
-    pub fn koma_ime_caret(&self, koma_id: &str) -> Option<(i32, i32, i32, i32)> {
+    pub fn koma_ime_caret(&self, koma_id: &KomaId) -> Option<(i32, i32, i32, i32)> {
         let id = self.koma_to_view.get(koma_id).copied()?;
         self.views.state(id)?.ime_caret
     }
 
-    pub fn resolve_devtools_url(&self, koma_id: &str) -> Result<String, String> {
+    pub fn resolve_devtools_url(&self, koma_id: &KomaId) -> Result<String, String> {
         let port = self
             .views
             .devtools_port()

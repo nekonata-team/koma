@@ -256,7 +256,7 @@ impl App {
             let strip_widget = self.ui.widget(cx, ids!(sheet_strip));
             let ready = strip_widget
                 .borrow_mut::<SheetStrip>()
-                .is_none_or(|mut strip| strip.focus_koma(cx, focused_id.as_deref()));
+                .is_none_or(|mut strip| strip.focus_koma(cx, focused_id.as_ref()));
             if ready {
                 self.pending_focus_sync = false;
             }

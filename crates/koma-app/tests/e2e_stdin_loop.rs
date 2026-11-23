@@ -287,6 +287,14 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
     .unwrap() else {
         panic!("expected new Koma ID")
     };
+    assert_eq!(
+        ipc(IpcCommand::KomaMove {
+            koma_id: koma_id.clone(),
+            placement: KomaPlacement::EndOf(koma_id.clone()),
+        })
+        .unwrap_err(),
+        format!("Sheet not found: {koma_id}")
+    );
     ipc(IpcCommand::KomaMove {
         koma_id: koma_id.clone(),
         placement: KomaPlacement::EndOf(sheet_id.clone()),
@@ -372,7 +380,7 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         .unwrap();
         wait_for_text("FOREGROUND-READY");
         let saved = koma_app::persistence::load(&profile_dir).unwrap().unwrap();
-        let terminal = saved.koma_by_id(&koma_id).unwrap();
+        let terminal = saved.koma_by_id(&koma_id.as_str().into()).unwrap();
         assert_eq!(terminal.label, "Working label");
         assert_eq!(
             terminal.cwd.as_deref().map(std::path::Path::new),
@@ -425,7 +433,10 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         if focused.koma.as_ref().is_some_and(|koma| koma.id == koma_id) {
             assert_eq!(focused.sheet_id, sheet_id);
             let saved = koma_app::persistence::load(&profile_dir).unwrap().unwrap();
-            assert_eq!(saved.koma_by_id(&koma_id).unwrap().width, 900.0);
+            assert_eq!(
+                saved.koma_by_id(&koma_id.as_str().into()).unwrap().width,
+                900.0
+            );
             break;
         }
         assert!(

@@ -7,7 +7,9 @@ use std::rc::Rc;
 
 use koma_app::config::CenterFocused;
 use koma_app::ghostty_config::{CellHeight, TerminalSettings};
-use koma_core::model::{InputMode, KomaKind, KomaMeta, WorkspaceState, MIN_PROPORTIONAL_WIDTH};
+use koma_core::model::{
+    InputMode, KomaId, KomaKind, KomaMeta, SheetId, WorkspaceState, MIN_PROPORTIONAL_WIDTH,
+};
 use makepad_app_terminal::term::color::Rgb;
 use makepad_app_terminal::widget::{MpTerm, TerminalColors};
 use makepad_widgets::makepad_draw::DrawList2d;
@@ -81,16 +83,16 @@ pub enum SheetStripAction {
     #[default]
     None,
     FocusKoma {
-        koma_id: String,
+        koma_id: KomaId,
         enter_content_input: bool,
     },
     EnterOverviewTarget {
         sheet_idx: usize,
-        koma_id: Option<String>,
+        koma_id: Option<KomaId>,
     },
     ExitOverview,
     MoveKoma {
-        koma_id: String,
+        koma_id: KomaId,
         target_sheet: usize,
         target_index: usize,
     },
@@ -99,7 +101,7 @@ pub enum SheetStripAction {
 
 #[derive(Clone, Debug)]
 struct KomaSlot {
-    koma_id: String,
+    koma_id: KomaId,
     kind: KomaKind,
     label: String,
     detail: String,
@@ -111,7 +113,7 @@ struct KomaSlot {
 
 #[derive(Clone, Debug)]
 struct StripDrag {
-    koma_id: String,
+    koma_id: KomaId,
     start_abs: Vec2d,
     active: bool,
     drop_index: Option<usize>,
@@ -119,22 +121,22 @@ struct StripDrag {
 
 #[derive(Clone, Debug)]
 struct SheetSnapshot {
-    sheet_id: String,
+    sheet_id: SheetId,
     label: String,
-    focused_koma_id: Option<String>,
+    focused_koma_id: Option<KomaId>,
     komas: Vec<KomaSlot>,
 }
 
 #[derive(Clone, Debug)]
 struct OverviewCardHit {
     sheet_idx: usize,
-    koma_id: String,
+    koma_id: KomaId,
     world_rect: Rect,
 }
 
 #[derive(Clone, Debug)]
 struct OverviewDrag {
-    koma_id: String,
+    koma_id: KomaId,
     origin_sheet: usize,
     start_abs: Vec2d,
     active: bool,
@@ -156,7 +158,7 @@ struct BgPanDrag {
 }
 
 struct SheetSlide {
-    prev_sheet_id: String,
+    prev_sheet_id: SheetId,
     prev_scroll_x: f64,
     offset_y: f64,
     direction: f64,
@@ -183,7 +185,7 @@ impl CloseGap {
     }
 
     fn after_removal(
-        gaps: &mut HashMap<String, Self>,
+        gaps: &mut HashMap<KomaId, Self>,
         closed: &KomaSlot,
         koma_gap: f64,
         existing: f64,
@@ -196,7 +198,7 @@ impl CloseGap {
     }
 
     fn transfer(
-        gaps: &mut HashMap<String, Self>,
+        gaps: &mut HashMap<KomaId, Self>,
         closed: &KomaSlot,
         next: &KomaSlot,
         koma_gap: f64,
@@ -208,21 +210,21 @@ impl CloseGap {
 }
 
 struct ReorderSlide {
-    offsets: HashMap<String, f64>,
+    offsets: HashMap<KomaId, f64>,
     elapsed: Option<f64>,
 }
 
 impl ReorderSlide {
-    fn offset(&self, id: &str) -> f64 {
+    fn offset(&self, id: &KomaId) -> f64 {
         let t = (1.0 - self.elapsed.unwrap_or(0.0) / KOMA_REORDER_SECONDS).max(0.0);
         self.offsets.get(id).copied().unwrap_or(0.0) * t * t * (3.0 - 2.0 * t)
     }
 
     fn between<'a>(
         old: &[KomaSlot],
-        new_ids: impl ExactSizeIterator<Item = &'a str>,
+        new_ids: impl ExactSizeIterator<Item = &'a KomaId>,
         gap: f64,
-        close_gaps: &HashMap<String, CloseGap>,
+        close_gaps: &HashMap<KomaId, CloseGap>,
         previous: Option<&Self>,
     ) -> Option<Self> {
         if old.len() != new_ids.len() {
@@ -233,7 +235,7 @@ impl ReorderSlide {
         for slot in old {
             x += close_gaps.get(&slot.koma_id).map_or(0.0, CloseGap::width);
             let carried = previous.map_or(0.0, |slide| slide.offset(&slot.koma_id));
-            positions.insert(slot.koma_id.as_str(), (x + carried, slot.width));
+            positions.insert(&slot.koma_id, (x + carried, slot.width));
             x += slot.width + gap;
         }
         let mut offsets = HashMap::new();
@@ -296,21 +298,21 @@ pub struct SheetStrip {
     #[rust]
     terminal_shell: Option<String>,
     #[rust]
-    koma_widgets: HashMap<String, WidgetRef>,
+    koma_widgets: HashMap<KomaId, WidgetRef>,
     #[rust]
     sheets: Vec<SheetSnapshot>,
     #[rust]
     active_sheet: usize,
     #[rust]
-    sheet_scroll_x: HashMap<String, f64>,
+    sheet_scroll_x: HashMap<SheetId, f64>,
     #[rust]
-    card_rects: Vec<(String, Rect)>,
+    card_rects: Vec<(KomaId, Rect)>,
     #[rust(InputMode::ContentInput)]
     mode: InputMode,
     #[rust]
-    pending_reveal_koma: Option<String>,
+    pending_reveal_koma: Option<KomaId>,
     #[rust]
-    pending_center_koma: Option<String>,
+    pending_center_koma: Option<KomaId>,
     #[rust]
     scroll_target_x: Option<f64>,
     #[rust]
@@ -322,7 +324,7 @@ pub struct SheetStrip {
     #[rust]
     sheet_slide: Option<SheetSlide>,
     #[rust]
-    close_gaps: HashMap<String, CloseGap>,
+    close_gaps: HashMap<KomaId, CloseGap>,
     #[rust]
     trailing_close_gap: Option<CloseGap>,
     #[rust]
@@ -357,7 +359,7 @@ pub struct SheetStrip {
     #[rust]
     overview_sheet_rects: Vec<(usize, Rect)>,
     #[rust]
-    hovered_koma: Option<String>,
+    hovered_koma: Option<KomaId>,
     #[rust]
     overview_drag: Option<OverviewDrag>,
     #[rust]
@@ -429,7 +431,7 @@ impl SheetStrip {
                 .and_then(|(old, new)| {
                     ReorderSlide::between(
                         &old.komas,
-                        new.komas.iter().map(|koma| koma.id.as_str()),
+                        new.komas.iter().map(|koma| &koma.id),
                         self.koma_gap,
                         &self.close_gaps,
                         self.reorder_slide.as_ref(),
@@ -528,7 +530,7 @@ impl SheetStrip {
                             raw_width: b.width,
                             ratio: b.ratio,
                             width: b.effective_width(usable, self.koma_gap),
-                            focused: focused_id.as_deref() == Some(b.id.as_str()),
+                            focused: focused_id.as_ref() == Some(&b.id),
                         }
                     })
                     .collect();
@@ -652,7 +654,7 @@ impl SheetStrip {
                     term.copy_on_select = settings.copy_on_select;
                     term.ligatures = settings.ligatures;
                     term.env = vec![
-                        ("KOMA_KOMA_ID".into(), koma.id.clone()),
+                        ("KOMA_KOMA_ID".into(), koma.id.to_string()),
                         ("KOMA_PROFILE".into(), koma.profile_id.clone()),
                         ("KOMA_SOCKET".into(), sock_path.to_string()),
                         ("PATH".into(), path_env.to_string()),
@@ -689,7 +691,7 @@ impl SheetStrip {
         }
     }
 
-    fn cancel_terminal_interaction(&self, cx: &mut Cx, koma_id: &str) {
+    fn cancel_terminal_interaction(&self, cx: &mut Cx, koma_id: &KomaId) {
         if let Some(widget) = self.koma_widgets.get(koma_id) {
             if let Some(mut term) = widget.borrow_mut::<MpTerm>() {
                 term.cancel_gestures(cx);
@@ -700,11 +702,11 @@ impl SheetStrip {
         }
     }
 
-    pub(super) fn hide_sheet_webviews(&self, cx: &mut Cx, sheet_id: &str) {
+    pub(super) fn hide_sheet_webviews(&self, cx: &mut Cx, sheet_id: &SheetId) {
         let Some(rt) = &self.shared_web_runtime else {
             return;
         };
-        let Some(sheet) = self.sheets.iter().find(|d| d.sheet_id == sheet_id) else {
+        let Some(sheet) = self.sheets.iter().find(|d| &d.sheet_id == sheet_id) else {
             return;
         };
         let mut rt = rt.borrow_mut();
@@ -726,12 +728,12 @@ impl SheetStrip {
         }
     }
 
-    pub fn close_koma(&mut self, cx: &mut Cx, koma_id: &str, kind: KomaKind) {
+    pub fn close_koma(&mut self, cx: &mut Cx, koma_id: &KomaId, kind: KomaKind) {
         self.animate_koma_close(cx, koma_id);
         self.remove_koma(cx, koma_id, kind);
     }
 
-    fn animate_koma_close(&mut self, cx: &mut Cx, koma_id: &str) {
+    fn animate_koma_close(&mut self, cx: &mut Cx, koma_id: &KomaId) {
         if self.is_overview_rendered()
             || self.sheet_slide.is_some()
             || self.last_viewport.size.x <= 1.0
@@ -741,7 +743,7 @@ impl SheetStrip {
         let Some(sheet) = self.sheets.get(self.active_sheet) else {
             return;
         };
-        let Some(index) = sheet.komas.iter().position(|slot| slot.koma_id == koma_id) else {
+        let Some(index) = sheet.komas.iter().position(|slot| &slot.koma_id == koma_id) else {
             return;
         };
         let closed = &sheet.komas[index];
@@ -765,20 +767,20 @@ impl SheetStrip {
         }
     }
 
-    pub fn remove_koma(&mut self, cx: &mut Cx, koma_id: &str, kind: KomaKind) {
+    pub fn remove_koma(&mut self, cx: &mut Cx, koma_id: &KomaId, kind: KomaKind) {
         self.close_gaps.remove(koma_id);
         if let Some(slide) = &mut self.reorder_slide {
             slide.offsets.remove(koma_id);
         }
         for sheet in &mut self.sheets {
-            sheet.komas.retain(|s| s.koma_id != koma_id);
+            sheet.komas.retain(|s| &s.koma_id != koma_id);
         }
         self.card_rects.retain(|(id, _)| id != koma_id);
-        self.overview_card_rects.retain(|c| c.koma_id != koma_id);
-        if self.hovered_koma.as_deref() == Some(koma_id) {
+        self.overview_card_rects.retain(|c| &c.koma_id != koma_id);
+        if self.hovered_koma.as_ref() == Some(koma_id) {
             self.hovered_koma = None;
         }
-        if self.pending_reveal_koma.as_deref() == Some(koma_id) {
+        if self.pending_reveal_koma.as_ref() == Some(koma_id) {
             self.pending_reveal_koma = None;
         }
         if let Some(widget) = self.koma_widgets.remove(koma_id) {
@@ -796,7 +798,7 @@ impl SheetStrip {
         self.redraw(cx);
     }
 
-    pub fn focus_koma(&mut self, cx: &mut Cx, koma_id: Option<&str>) -> bool {
+    pub fn focus_koma(&mut self, cx: &mut Cx, koma_id: Option<&KomaId>) -> bool {
         self.blur_except(cx, koma_id);
         let Some(id) = koma_id else {
             return true;
@@ -819,9 +821,9 @@ impl SheetStrip {
         self.blur_except(cx, None);
     }
 
-    fn blur_except(&mut self, cx: &mut Cx, keep_id: Option<&str>) {
+    fn blur_except(&mut self, cx: &mut Cx, keep_id: Option<&KomaId>) {
         for (id, widget) in &self.koma_widgets {
-            if keep_id == Some(id.as_str()) {
+            if keep_id == Some(id) {
                 continue;
             }
             if let Some(term) = widget.borrow::<MpTerm>() {
@@ -841,7 +843,7 @@ impl SheetStrip {
         }
     }
 
-    pub fn focused_widget_koma_id(&self, cx: &Cx) -> Option<String> {
+    pub fn focused_widget_koma_id(&self, cx: &Cx) -> Option<KomaId> {
         let sheet = self.sheets.get(self.active_sheet)?;
         for slot in &sheet.komas {
             let Some(widget) = self.koma_widgets.get(&slot.koma_id) else {
@@ -862,21 +864,25 @@ impl SheetStrip {
         None
     }
 
-    pub fn koma_id_for_widget_uid(&self, uid: WidgetUid) -> Option<String> {
+    pub fn koma_id_for_widget_uid(&self, uid: WidgetUid) -> Option<KomaId> {
         self.koma_widgets
             .iter()
             .find(|(_, w)| w.widget_uid() == uid)
             .map(|(id, _)| id.clone())
     }
 
-    pub fn terminal_rows(&self, koma_id: &str, fetch_lines: Option<usize>) -> Option<Vec<String>> {
+    pub fn terminal_rows(
+        &self,
+        koma_id: &KomaId,
+        fetch_lines: Option<usize>,
+    ) -> Option<Vec<String>> {
         let widget = self.koma_widgets.get(koma_id)?;
         let term = widget.borrow::<MpTerm>()?;
         let (rows, _, _) = term.ai_screen_rows(fetch_lines)?;
         Some(rows)
     }
 
-    pub fn send_terminal_text(&mut self, koma_id: &str, text: &str) -> bool {
+    pub fn send_terminal_text(&mut self, koma_id: &KomaId, text: &str) -> bool {
         let Some(widget) = self.koma_widgets.get(koma_id) else {
             return false;
         };
@@ -887,7 +893,7 @@ impl SheetStrip {
 
     pub fn with_terminal<T>(
         &self,
-        koma_id: &str,
+        koma_id: &KomaId,
         operation: impl FnOnce(&mut MpTerm) -> Result<T, String>,
     ) -> Result<T, String> {
         let mut term = self
@@ -963,12 +969,12 @@ impl SheetStrip {
         }
     }
 
-    fn target_scroll_x_for_koma(&self, koma_id: &str, view_w: f64) -> Option<f64> {
+    fn target_scroll_x_for_koma(&self, koma_id: &KomaId, view_w: f64) -> Option<f64> {
         if view_w <= 1.0 {
             return None;
         }
         let sheet = self.sheets.get(self.active_sheet)?;
-        let target_idx = sheet.komas.iter().position(|s| s.koma_id == koma_id)?;
+        let target_idx = sheet.komas.iter().position(|s| &s.koma_id == koma_id)?;
         let (start_x, end_x) = self.koma_x_span(sheet, target_idx);
         let want_left = (start_x - self.koma_gap).max(0.0);
         let want_right = end_x + self.koma_gap;
@@ -985,18 +991,18 @@ impl SheetStrip {
         }
     }
 
-    fn target_center_scroll_x_for_koma(&self, koma_id: &str, view_w: f64) -> Option<f64> {
+    fn target_center_scroll_x_for_koma(&self, koma_id: &KomaId, view_w: f64) -> Option<f64> {
         if view_w <= 1.0 {
             return None;
         }
         let sheet = self.sheets.get(self.active_sheet)?;
-        let target_idx = sheet.komas.iter().position(|s| s.koma_id == koma_id)?;
+        let target_idx = sheet.komas.iter().position(|s| &s.koma_id == koma_id)?;
         let (start_x, end_x) = self.koma_x_span(sheet, target_idx);
         let max_scroll = (self.sheet_total_width(sheet) - view_w).max(0.0);
         Some(((start_x + end_x) * 0.5 - view_w * 0.5).clamp(0.0, max_scroll))
     }
 
-    fn target_reveal_scroll_x_for_koma(&self, koma_id: &str, view_w: f64) -> Option<f64> {
+    fn target_reveal_scroll_x_for_koma(&self, koma_id: &KomaId, view_w: f64) -> Option<f64> {
         match self.center_focused {
             CenterFocused::Never => self.target_scroll_x_for_koma(koma_id, view_w),
             CenterFocused::Always => self.target_center_scroll_x_for_koma(koma_id, view_w),
@@ -1036,10 +1042,10 @@ impl SheetStrip {
         }
     }
 
-    fn ensure_koma_visible(&mut self, cx: &mut Cx, koma_id: &str) {
+    fn ensure_koma_visible(&mut self, cx: &mut Cx, koma_id: &KomaId) {
         let view_w = self.scroll_bars.get_scroll_view_visible().x;
         if view_w <= 1.0 {
-            self.pending_reveal_koma = Some(koma_id.to_string());
+            self.pending_reveal_koma = Some(koma_id.clone());
             return;
         }
         self.pending_reveal_koma = None;
@@ -1246,8 +1252,8 @@ impl Widget for SheetStrip {
                         let already_focused = self
                             .sheets
                             .get(self.active_sheet)
-                            .and_then(|d| d.focused_koma_id.as_deref())
-                            == Some(clicked_id.as_str());
+                            .and_then(|d| d.focused_koma_id.as_ref())
+                            == Some(&clicked_id);
                         let in_header = me.abs.y <= card_rect.pos.y + HEADER_HEIGHT + 4.0;
                         if in_header && !me.button.is_secondary() {
                             self.strip_drag = Some(StripDrag {
@@ -1554,13 +1560,13 @@ mod tests {
         let (a, b, c) = (slot("a", 320.0), slot("b", 480.0), slot("c", 640.0));
         let mut gaps = HashMap::new();
         CloseGap::transfer(&mut gaps, &a, &b, STRIP_SPACING);
-        let gap = gaps.get_mut("b").unwrap();
+        let gap = gaps.get_mut(&b.koma_id).unwrap();
         gap.elapsed = Some(KOMA_CLOSE_SECONDS / 2.0);
         let displayed_c_offset = gap.width() + b.width + STRIP_SPACING;
 
         CloseGap::transfer(&mut gaps, &b, &c, STRIP_SPACING);
         assert_eq!(gaps.len(), 1);
-        let gap = gaps.get_mut("c").unwrap();
+        let gap = gaps.get_mut(&c.koma_id).unwrap();
         assert_eq!(gap.width(), displayed_c_offset);
         gap.elapsed = Some(KOMA_CLOSE_SECONDS);
         assert_eq!(gap.width(), 0.0);
@@ -1573,31 +1579,41 @@ mod tests {
         let old_b_x = a.width + STRIP_SPACING;
         let gaps = HashMap::new();
         let ab = [a.clone(), b.clone()];
-        let mut slide =
-            ReorderSlide::between(&ab, ["b", "a"].into_iter(), STRIP_SPACING, &gaps, None).unwrap();
-        assert_eq!(slide.offset("b"), old_b_x);
-        assert_eq!(slide.offset("a"), -(b.width + STRIP_SPACING));
+        let mut slide = ReorderSlide::between(
+            &ab,
+            [&b.koma_id, &a.koma_id].into_iter(),
+            STRIP_SPACING,
+            &gaps,
+            None,
+        )
+        .unwrap();
+        assert_eq!(slide.offset(&b.koma_id), old_b_x);
+        assert_eq!(slide.offset(&a.koma_id), -(b.width + STRIP_SPACING));
         slide.advance(0.0);
         assert!(slide.advance(KOMA_REORDER_SECONDS / 2.0));
 
-        let displayed_b_x = slide.offset("b");
+        let displayed_b_x = slide.offset(&b.koma_id);
         let ba = [b, a];
         let mut reversed = ReorderSlide::between(
             &ba,
-            ["a", "b"].into_iter(),
+            ab.iter().map(|slot| &slot.koma_id),
             STRIP_SPACING,
             &gaps,
             Some(&slide),
         )
         .unwrap();
-        assert_eq!(old_b_x + reversed.offset("b"), displayed_b_x);
+        assert_eq!(old_b_x + reversed.offset(&ba[0].koma_id), displayed_b_x);
         reversed.advance(0.0);
         assert!(!reversed.advance(KOMA_REORDER_SECONDS));
-        assert_eq!(reversed.offset("b"), 0.0);
-        assert!(
-            ReorderSlide::between(&ab, ["c", "a"].into_iter(), STRIP_SPACING, &gaps, None)
-                .is_none()
-        );
+        assert_eq!(reversed.offset(&ba[0].koma_id), 0.0);
+        assert!(ReorderSlide::between(
+            &ab,
+            [&"c".into(), &ab[0].koma_id].into_iter(),
+            STRIP_SPACING,
+            &gaps,
+            None,
+        )
+        .is_none());
     }
 
     #[test]
@@ -1606,11 +1622,11 @@ mod tests {
         let mut gaps = HashMap::new();
         CloseGap::transfer(&mut gaps, &a, &b, STRIP_SPACING);
         let mut trailing = CloseGap::after_removal(&mut gaps, &c, STRIP_SPACING, 0.0);
-        for gap in [&mut trailing, gaps.get_mut("b").unwrap()] {
+        for gap in [&mut trailing, gaps.get_mut(&b.koma_id).unwrap()] {
             gap.advance(0.0);
             gap.advance(KOMA_CLOSE_SECONDS / 2.0);
         }
-        let old_width = gaps["b"].width() + b.width + STRIP_SPACING + trailing.width();
+        let old_width = gaps[&b.koma_id].width() + b.width + STRIP_SPACING + trailing.width();
         let mut new_trailing =
             CloseGap::after_removal(&mut gaps, &b, STRIP_SPACING, trailing.width());
         assert!(gaps.is_empty());

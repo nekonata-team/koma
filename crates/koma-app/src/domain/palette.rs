@@ -3,7 +3,7 @@
 use crate::config::Config;
 use crate::domain::router::RouteDecision;
 use crate::domain::sheet_presets::available_sheet_presets;
-use koma_core::model::WorkspaceState;
+use koma_core::model::{KomaId, WorkspaceState};
 
 pub const MAX_CANDIDATES: usize = 10;
 
@@ -14,7 +14,7 @@ pub enum PaletteAction {
     OpenInput(String),
     Prefill(String),
     ApplyPreset(String),
-    FocusKoma(String),
+    FocusKoma(KomaId),
     SwitchProfile(String),
     Run(RouteDecision),
 }

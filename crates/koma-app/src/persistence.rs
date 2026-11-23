@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use makepad_micro_serde::*;
 
 use koma_core::model::{
-    KomaKind, KomaMeta, PersonalSheetPreset, RecentEntry, SheetState, WorkspaceState,
-    MAX_KOMA_WIDTH, MIN_KOMA_WIDTH,
+    KomaId, KomaKind, KomaMeta, PersonalSheetPreset, RecentEntry, SheetId, SheetState,
+    WorkspaceState, MAX_KOMA_WIDTH, MIN_KOMA_WIDTH,
 };
 
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
@@ -25,7 +25,7 @@ struct SavedKoma {
 impl SavedKoma {
     fn from_meta(b: &KomaMeta) -> Self {
         Self {
-            id: b.id.clone(),
+            id: b.id.to_string(),
             kind: b.kind.as_str().into(),
             label: b.label.clone(),
             initial_url: b.initial_url.clone(),
@@ -37,7 +37,7 @@ impl SavedKoma {
         }
     }
 
-    fn into_meta(self, sheet_id: String, profile_id: String) -> Result<KomaMeta, String> {
+    fn into_meta(self, sheet_id: Option<SheetId>, profile_id: String) -> Result<KomaMeta, String> {
         let kind = match self.kind.as_str() {
             "terminal" => KomaKind::Terminal,
             "web" => KomaKind::Web,
@@ -52,7 +52,7 @@ impl SavedKoma {
             }
         }
         Ok(KomaMeta {
-            id: self.id,
+            id: self.id.into(),
             sheet_id,
             profile_id,
             kind,
@@ -114,9 +114,9 @@ pub fn to_json(state: &WorkspaceState) -> String {
             .sheets()
             .iter()
             .map(|d| SavedSheet {
-                id: d.id.clone(),
+                id: d.id.to_string(),
                 label: d.label.clone(),
-                focused_koma_id: d.focused_koma_id.clone(),
+                focused_koma_id: d.focused_koma_id.as_ref().map(ToString::to_string),
                 komas: d.komas.iter().map(SavedKoma::from_meta).collect(),
             })
             .collect(),
@@ -154,20 +154,21 @@ pub fn from_json(text: &str) -> Result<WorkspaceState, String> {
     }
     let mut sheets = Vec::new();
     for d in saved.sheets {
+        let sheet_id = SheetId::from(d.id);
         let mut komas = Vec::new();
         for b in d.komas {
-            komas.push(b.into_meta(d.id.clone(), saved.profile_id.clone())?);
+            komas.push(b.into_meta(Some(sheet_id.clone()), saved.profile_id.clone())?);
         }
         sheets.push(SheetState {
-            id: d.id,
+            id: sheet_id,
             label: d.label,
-            focused_koma_id: d.focused_koma_id,
+            focused_koma_id: d.focused_koma_id.map(KomaId::from),
             komas,
         });
     }
     let mut drawer = Vec::new();
     for b in saved.drawer.unwrap_or_default() {
-        drawer.push(b.into_meta("drawer".into(), saved.profile_id.clone())?);
+        drawer.push(b.into_meta(None, saved.profile_id.clone())?);
     }
     let recents = saved
         .recents
@@ -280,11 +281,16 @@ mod tests {
         save(&dir, &state).unwrap();
         let loaded = load(&dir).unwrap().unwrap();
         assert_eq!(loaded, state);
+        assert_eq!(loaded.drawer[0].sheet_id, None);
+        assert_eq!(
+            loaded.sheets()[0].komas[0].sheet_id.as_ref(),
+            Some(&loaded.sheets()[0].id)
+        );
 
         // IDs in the saved layout must not affect whether the file is loaded.
         save(&dir, &WorkspaceState::poc_default()).unwrap();
         let loaded = load(&dir).unwrap().unwrap();
-        assert!(loaded.koma_by_id("sheet1-web").is_some());
+        assert!(loaded.koma_by_id(&"sheet1-web".into()).is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

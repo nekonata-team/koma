@@ -330,7 +330,7 @@ impl SheetStrip {
                     cx.push_clip_rect(card_clip);
                     let card_walk =
                         Walk::fixed(slot.width, card_h).with_abs_pos(card_local_rect.pos);
-                    let is_hovered = hovered_id.as_deref() == Some(slot.koma_id.as_str());
+                    let is_hovered = hovered_id.as_ref() == Some(&slot.koma_id);
                     let is_selected = is_active_sheet && slot.focused;
                     let selected_or_hovered = KomaSlot {
                         focused: is_selected,
@@ -345,7 +345,7 @@ impl SheetStrip {
                         is_hovered,
                     );
                     if slot.kind == KomaKind::Web {
-                        visible_web_ids.insert(slot.koma_id.as_str());
+                        visible_web_ids.insert(&slot.koma_id);
                     }
                     cx.pop_clip_rect();
                 }
@@ -388,7 +388,7 @@ impl SheetStrip {
                         rt.set_koma_hidden(
                             cx,
                             &slot.koma_id,
-                            !visible_web_ids.contains(slot.koma_id.as_str()),
+                            !visible_web_ids.contains(&slot.koma_id),
                         );
                     }
                 }
