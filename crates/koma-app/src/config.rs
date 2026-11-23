@@ -31,6 +31,7 @@ impl CenterFocused {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TerminalConfig {
+    pub shell: Option<String>,
     pub session_prefixes: Vec<String>,
     pub session_list_command: Option<String>,
 }
@@ -187,6 +188,14 @@ impl Config {
         }
         if let Some(terminal) = table.get("terminal") {
             let terminal = terminal.as_table().ok_or("[terminal] must be a table")?;
+            if let Some(value) = terminal.get("shell") {
+                let shell = value
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or("terminal.shell must be a non-empty string")?;
+                config.terminal.shell = Some(shell.to_string());
+            }
             if let Some(value) = terminal.get("session_prefixes") {
                 let list = value
                     .as_array()
@@ -332,6 +341,7 @@ repo = ":terminal ~/projects"
 zmx = ":terminal ~ zmx attach {}"
 
 [terminal]
+shell = "pwsh"
 session_prefixes = ["zmx attach "]
 session_list_command = "zmx list --short"
 
@@ -354,7 +364,9 @@ komas = [":terminal", "https://example.com"]
         );
         assert!(cfg.expand_alias(":zmx").is_err());
         assert_eq!(cfg.expand_alias(":terminal").unwrap(), None);
+        assert_eq!(cfg.terminal.shell.as_deref(), Some("pwsh"));
         assert_eq!(cfg.terminal.session_prefixes, vec!["zmx attach "]);
+        assert!(Config::parse("[terminal]\nshell = \"   \"").is_err());
         assert_eq!(
             cfg.terminal.session_list_command.as_deref(),
             Some("zmx list --short")

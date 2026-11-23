@@ -294,6 +294,8 @@ pub struct SheetStrip {
     #[rust]
     terminal_settings: TerminalSettings,
     #[rust]
+    terminal_shell: Option<String>,
+    #[rust]
     koma_widgets: HashMap<String, WidgetRef>,
     #[rust]
     sheets: Vec<SheetSnapshot>,
@@ -369,6 +371,10 @@ impl SheetStrip {
 
     pub fn set_terminal_settings(&mut self, settings: TerminalSettings) {
         self.terminal_settings = settings;
+    }
+
+    pub fn set_terminal_shell(&mut self, shell: Option<String>) {
+        self.terminal_shell = shell;
     }
 
     pub fn set_center_focused(&mut self, mode: CenterFocused) {
@@ -641,6 +647,7 @@ impl SheetStrip {
                         background_opacity: settings.background_opacity,
                     });
                     term.cwd = koma.cwd.as_deref().map(PathBuf::from);
+                    term.shell = self.terminal_shell.clone();
                     term.command = koma.command.clone();
                     term.copy_on_select = settings.copy_on_select;
                     term.ligatures = settings.ligatures;

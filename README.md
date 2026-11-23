@@ -61,6 +61,7 @@ zmx = ":terminal ~ zmx attach {}"          # {} で :<alias> <arg> の引数を�
 gh = "https://github.com/{}"
 
 [terminal]
+shell = "pwsh"                            # 既定のシェルを指定（未指定時は OS 既定）
 session_prefixes = ["zmx attach "]        # Duplicate koma 時に末尾へ -2, -3 を付与
 session_list_command = "zmx list --short" # 外部セッション名との重複を回避（1行1名）
 

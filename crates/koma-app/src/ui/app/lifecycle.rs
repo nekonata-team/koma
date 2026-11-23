@@ -212,6 +212,7 @@ impl App {
         {
             strip.set_shared_web_runtime(Rc::clone(&web_runtime));
             strip.set_terminal_settings(terminal_settings);
+            strip.set_terminal_shell(self.config.terminal.shell.clone());
             strip.set_center_focused(self.config.center_focused);
             strip.set_koma_gap(self.config.koma_gap);
         }
@@ -255,6 +256,7 @@ impl App {
             .borrow_mut::<SheetStrip>()
         {
             strip.set_terminal_settings(terminal_settings);
+            strip.set_terminal_shell(self.config.terminal.shell.clone());
             strip.set_center_focused(self.config.center_focused);
             strip.set_koma_gap(self.config.koma_gap);
         }
