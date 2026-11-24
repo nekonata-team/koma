@@ -349,7 +349,8 @@ impl App {
                         if koma_api && !is_local_html_url(&url) {
                             IpcResponse::err("--koma-api requires a local .html or .htm file")
                         } else {
-                            let koma = self.create_web_koma(cx, url.clone(), Some(label));
+                            let koma =
+                                self.create_web_koma_after(cx, url.clone(), Some(label), caller);
                             if koma_api {
                                 self.state.set_koma_api_enabled(&koma.id, true);
                                 self.web_runtime()
@@ -617,7 +618,7 @@ impl App {
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                     .map(|p| expand_tilde(p, home_dir.as_deref()));
-                let koma = self.create_terminal_koma(cx, cwd);
+                let koma = self.create_terminal_koma_after(cx, cwd, caller);
                 let resp = match run {
                     Some(command) => match self.with_terminal_from_ipc(cx, &koma.id, |cx, term| {
                         term.run_command(cx, &command)

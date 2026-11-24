@@ -258,6 +258,17 @@ impl CloseGap {
     }
 }
 
+fn koma_start_x(komas: &[KomaSlot], koma_id: &KomaId, koma_gap: f64) -> Option<f64> {
+    let mut x = 0.0;
+    for slot in komas {
+        if &slot.koma_id == koma_id {
+            return Some(x);
+        }
+        x += slot.width + koma_gap;
+    }
+    None
+}
+
 struct ReorderSlide {
     offsets: HashMap<KomaId, f64>,
     elapsed: Option<f64>,
@@ -476,6 +487,16 @@ impl SheetStrip {
                 .map(|slot| &slot.koma_id)
                 .eq(new.komas.iter().map(|koma| &koma.id))
         });
+        let old_focused_anchor = if !reveal_focused && !in_overview {
+            same_sheet.and_then(|(old, new)| {
+                let fid = old.focused_koma_id.as_ref()?;
+                (new.focused_koma_id.as_ref() == Some(fid)).then(|| {
+                    koma_start_x(&old.komas, fid, self.koma_gap).map(|old_x| (fid.clone(), old_x))
+                })?
+            })
+        } else {
+            None
+        };
         let mut trigger_slide = false;
         if in_overview || !same_order {
             self.reorder_slide = same_sheet
@@ -484,6 +505,7 @@ impl SheetStrip {
                         && !self.is_overview_rendered()
                         && self.sheet_slide.is_none()
                         && self.last_viewport.size.x > 1.0
+                        && old_focused_anchor.is_none()
                 })
                 .and_then(|(old, new)| {
                     ReorderSlide::between(
@@ -616,6 +638,20 @@ impl SheetStrip {
             let _ = self
                 .scroll_bars
                 .set_scroll_pos_no_clip(cx, dvec2(restored, 0.0));
+        } else if let Some((fid, old_x)) = old_focused_anchor {
+            if let Some(new_x) = self
+                .sheets
+                .get(self.active_sheet)
+                .and_then(|sheet| koma_start_x(&sheet.komas, &fid, self.koma_gap))
+            {
+                let delta = new_x - old_x;
+                if delta.abs() >= 0.5 {
+                    self.scroll_target_x = None;
+                    let _ = self
+                        .scroll_bars
+                        .set_scroll_pos_no_clip(cx, dvec2((prev_scroll_x + delta).max(0.0), 0.0));
+                }
+            }
         }
         if in_overview {
             self.strip_drag = None;
@@ -1833,5 +1869,15 @@ mod tests {
         assert_eq!(new_trailing.width(), old_width);
         new_trailing.advance(0.0);
         assert!(!new_trailing.advance(KOMA_CLOSE_SECONDS));
+    }
+
+    #[test]
+    fn koma_start_x_tracks_scroll_offset_when_inserting_left_of_focus() {
+        let (a, x, b) = (slot("a", 320.0), slot("x", 400.0), slot("b", 480.0));
+        let before = [a.clone(), b.clone()];
+        let after_left_insert = [a, x.clone(), b];
+        let old_x = koma_start_x(&before, &"b".into(), STRIP_SPACING).unwrap();
+        let new_x = koma_start_x(&after_left_insert, &"b".into(), STRIP_SPACING).unwrap();
+        assert_eq!(new_x - old_x, x.width + STRIP_SPACING);
     }
 }

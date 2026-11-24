@@ -446,7 +446,16 @@ impl App {
     }
 
     pub(super) fn create_terminal_koma(&mut self, cx: &mut Cx, cwd: Option<String>) -> KomaMeta {
-        self.create_koma(cx, KomaInput::Terminal { cwd, command: None }, None)
+        self.create_terminal_koma_after(cx, cwd, None)
+    }
+
+    pub(super) fn create_terminal_koma_after(
+        &mut self,
+        cx: &mut Cx,
+        cwd: Option<String>,
+        caller: Option<&KomaId>,
+    ) -> KomaMeta {
+        self.create_koma_after(cx, KomaInput::Terminal { cwd, command: None }, None, caller)
     }
 
     pub(super) fn create_web_koma(
@@ -455,11 +464,31 @@ impl App {
         url: String,
         label: Option<String>,
     ) -> KomaMeta {
+        self.create_web_koma_after(cx, url, label, None)
+    }
+
+    pub(super) fn create_web_koma_after(
+        &mut self,
+        cx: &mut Cx,
+        url: String,
+        label: Option<String>,
+        caller: Option<&KomaId>,
+    ) -> KomaMeta {
         let label = label.unwrap_or_else(|| derive_url_label(&url));
-        self.create_koma(cx, KomaInput::Web { url, label }, None)
+        self.create_koma_after(cx, KomaInput::Web { url, label }, None, caller)
     }
 
     fn create_koma(&mut self, cx: &mut Cx, input: KomaInput, recent: Option<&str>) -> KomaMeta {
+        self.create_koma_after(cx, input, recent, None)
+    }
+
+    fn create_koma_after(
+        &mut self,
+        cx: &mut Cx,
+        input: KomaInput,
+        recent: Option<&str>,
+        caller: Option<&KomaId>,
+    ) -> KomaMeta {
         let (kind, label, url, cwd, command) = match input {
             KomaInput::Terminal { cwd, command } => {
                 let label = if cwd.is_some() {
@@ -476,14 +505,16 @@ impl App {
             }
             KomaInput::Web { url, label } => (KomaKind::Web, label, Some(url), None, None),
         };
-        let koma = self
+        let (koma, focused_active) = self
             .state
-            .insert_koma_with_command(kind, label, url, cwd, command);
-        self.state.mode = InputMode::ContentInput;
+            .insert_koma_after(kind, label, url, cwd, command, caller);
+        if focused_active {
+            self.state.mode = InputMode::ContentInput;
+        }
         if let Some(input) = recent {
             self.state.record_recent(input, koma.label.as_str());
         }
-        self.sync_after_mutation(cx, true);
+        self.sync_after_mutation(cx, focused_active);
         koma
     }
 

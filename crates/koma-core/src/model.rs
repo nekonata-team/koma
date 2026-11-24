@@ -657,13 +657,48 @@ impl WorkspaceState {
         cwd: Option<String>,
         command: Option<String>,
     ) -> KomaMeta {
+        self.insert_koma_after(kind, label, initial_url, cwd, command, None)
+            .0
+    }
+
+    /// Inserts a Koma after `caller` on `caller`'s Sheet when present, or after the
+    /// active Sheet's focused Koma. Returns `(koma, focused_in_active_sheet)`.
+    pub fn insert_koma_after(
+        &mut self,
+        kind: KomaKind,
+        label: String,
+        initial_url: Option<String>,
+        cwd: Option<String>,
+        command: Option<String>,
+        caller: Option<&KomaId>,
+    ) -> (KomaMeta, bool) {
         let id = self.allocate_koma_id();
         let profile_id = self.profile_id.clone();
-        let sheet = self.current_sheet_mut();
-        let insert_idx = sheet
-            .focused_index()
-            .map(|idx| (idx + 1).min(sheet.komas.len()))
-            .unwrap_or(0);
+        let caller_pos = caller.and_then(|cid| {
+            self.sheets.iter().enumerate().find_map(|(s_idx, sheet)| {
+                sheet
+                    .komas
+                    .iter()
+                    .position(|k| &k.id == cid)
+                    .map(|k_idx| (s_idx, k_idx, cid))
+            })
+        });
+        let (sheet_idx, insert_idx, should_focus) = match caller_pos {
+            Some((s_idx, k_idx, cid)) => {
+                let is_active_focused = s_idx == self.active_sheet
+                    && self.sheets[s_idx].focused_koma_id.as_ref() == Some(cid);
+                (s_idx, k_idx + 1, is_active_focused)
+            }
+            None => {
+                let sheet = &self.sheets[self.active_sheet];
+                let idx = sheet
+                    .focused_index()
+                    .map(|i| (i + 1).min(sheet.komas.len()))
+                    .unwrap_or(0);
+                (self.active_sheet, idx, true)
+            }
+        };
+        let sheet = &mut self.sheets[sheet_idx];
         let koma = KomaMeta {
             id: id.clone(),
             sheet_id: Some(sheet.id.clone()),
@@ -679,8 +714,10 @@ impl WorkspaceState {
             koma_api_enabled: false,
         };
         sheet.komas.insert(insert_idx, koma.clone());
-        sheet.focused_koma_id = Some(id);
-        koma
+        if should_focus {
+            sheet.focused_koma_id = Some(id);
+        }
+        (koma, should_focus)
     }
 
     pub fn duplicate_focused_koma(
@@ -1465,5 +1502,67 @@ mod tests {
         let plain = state.duplicate_focused_koma(&[], &[], None).unwrap();
         assert_eq!(plain.command, None);
         assert_eq!(plain.cwd.as_deref(), Some("/tmp"));
+    }
+
+    #[test]
+    fn insert_koma_after_places_next_to_caller_without_stealing_focus_when_inactive() {
+        let mut state = WorkspaceState::new();
+        let caller =
+            state.insert_koma_after_focused(KomaKind::Terminal, "Caller".into(), None, None);
+        let sibling =
+            state.insert_koma_after_focused(KomaKind::Terminal, "Sibling".into(), None, None);
+        // Active sheet now focuses `sibling`; inserting after `caller` keeps focus on `sibling`.
+        let (same_sheet, focused_active) = state.insert_koma_after(
+            KomaKind::Terminal,
+            "AfterCaller".into(),
+            None,
+            None,
+            None,
+            Some(&caller.id),
+        );
+        assert!(!focused_active);
+        assert_eq!(state.focused_koma().map(|k| &k.id), Some(&sibling.id));
+        assert_eq!(
+            state.sheets[0]
+                .komas
+                .iter()
+                .map(|k| k.id.clone())
+                .collect::<Vec<_>>(),
+            vec![caller.id.clone(), same_sheet.id.clone(), sibling.id.clone()]
+        );
+
+        // Switch to another sheet and insert after `caller` on sheet 0 without changing active sheet.
+        let sheet2_idx = state.add_sheet(false);
+        state.switch_sheet(sheet2_idx);
+        let sheet2_id = state.current_sheet().id.clone();
+        assert_eq!(state.current_sheet().id, sheet2_id);
+        let (other_sheet, focused_active) = state.insert_koma_after(
+            KomaKind::Web,
+            "Background".into(),
+            Some("https://example.com".into()),
+            None,
+            None,
+            Some(&caller.id),
+        );
+        assert!(!focused_active);
+        assert_eq!(state.current_sheet().id, sheet2_id);
+        assert_eq!(
+            state.sheets[0].komas[1].id, other_sheet.id,
+            "should insert right after caller on sheet 0"
+        );
+
+        // When caller is focused on the active sheet, the new Koma takes focus.
+        state.switch_sheet(0);
+        state.focus_koma_by_id(&caller.id);
+        let (focused_new, focused_active) = state.insert_koma_after(
+            KomaKind::Terminal,
+            "FocusedNew".into(),
+            None,
+            None,
+            None,
+            Some(&caller.id),
+        );
+        assert!(focused_active);
+        assert_eq!(state.focused_koma().map(|k| &k.id), Some(&focused_new.id));
     }
 }
