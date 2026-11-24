@@ -173,6 +173,35 @@ script_mod! {
                         }
                     }
 
+                    web_modal_dialog := Dialog{
+                        size: Sm
+                        content +: {
+                            body +: {
+                                spacing: 8
+                                web_modal_origin := Label{
+                                    width: Fill
+                                    text: ""
+                                    draw_text.color: #x8b95b5
+                                }
+                                web_modal_message := Label{
+                                    width: Fill
+                                    text: ""
+                                }
+                                web_modal_input := TextInput{
+                                    visible: false
+                                    width: Fill
+                                    empty_text: ""
+                                }
+                                web_modal_password := TextInput{
+                                    visible: false
+                                    width: Fill
+                                    is_password: true
+                                    empty_text: "Password"
+                                }
+                            }
+                        }
+                    }
+
                     toaster := Toaster{place: BottomEnd}
                 }
             }
@@ -276,6 +305,22 @@ pub struct App {
     pending_web_folder_dialog: Option<(makepad_browser_view::ViewId, u64)>,
     #[rust]
     pending_web_downloads: HashMap<u64, (makepad_browser_view::ViewId, u32)>,
+    #[rust]
+    active_web_modal: Option<WebModalRequest>,
+    #[rust]
+    web_modal_queue: std::collections::VecDeque<WebModalRequest>,
+}
+
+#[derive(Clone, Debug)]
+enum WebModalRequest {
+    JsDialog {
+        view_id: makepad_browser_view::ViewId,
+        req: makepad_browser_view::JsDialogEvent,
+    },
+    Auth {
+        view_id: makepad_browser_view::ViewId,
+        req: makepad_browser_view::AuthRequestEvent,
+    },
 }
 
 impl App {
@@ -1133,6 +1178,30 @@ impl MatchEvent for App {
             self.apply_focus(cx);
         }
 
+        let web_modal = self.ui.dialog(cx, ids!(web_modal_dialog));
+        if web_modal.confirmed(actions) {
+            self.resolve_active_web_modal(cx, true);
+        } else if web_modal.cancelled(actions) || web_modal.dismissed(actions) {
+            self.resolve_active_web_modal(cx, false);
+        } else if self.active_web_modal.is_some()
+            && (self
+                .ui
+                .text_input(cx, ids!(web_modal_password))
+                .returned(actions)
+                .is_some()
+                || (matches!(
+                    self.active_web_modal,
+                    Some(WebModalRequest::JsDialog { .. })
+                ) && self
+                    .ui
+                    .text_input(cx, ids!(web_modal_input))
+                    .returned(actions)
+                    .is_some()))
+        {
+            web_modal.close(cx);
+            self.resolve_active_web_modal(cx, true);
+        }
+
         if self.ui.button(cx, ids!(btn_prompt_cancel)).clicked(actions) {
             self.close_prompt(cx);
         }
@@ -1348,7 +1417,8 @@ impl AppMain for App {
             _ => {}
         }
 
-        let dialog_open = self.ui.dialog(cx, ids!(close_sheet_dialog)).is_open();
+        let dialog_open = self.ui.dialog(cx, ids!(close_sheet_dialog)).is_open()
+            || self.ui.dialog(cx, ids!(web_modal_dialog)).is_open();
         if matches!(event, Event::Pinch(_))
             && (dialog_open || self.current_overlay() != OverlayKind::None)
         {
@@ -1497,6 +1567,14 @@ impl AppMain for App {
                 Toast::new(toast_id, &msg)
             };
             self.ui.toaster(cx, ids!(toaster)).show(cx, toast);
+        }
+        let js_dialogs = self.web_runtime().borrow_mut().take_js_dialogs();
+        for (view_id, req) in js_dialogs {
+            self.enqueue_web_modal(cx, WebModalRequest::JsDialog { view_id, req });
+        }
+        let auth_requests = self.web_runtime().borrow_mut().take_auth_requests();
+        for (view_id, req) in auth_requests {
+            self.enqueue_web_modal(cx, WebModalRequest::Auth { view_id, req });
         }
         let closed_komas = self.web_runtime().borrow_mut().take_closed_komas();
         for koma_id in closed_komas {
@@ -1771,6 +1849,130 @@ impl App {
             }
             FileDialogAction::FileLoaded { .. } | FileDialogAction::None => {}
         }
+    }
+
+    fn enqueue_web_modal(&mut self, cx: &mut Cx, request: WebModalRequest) {
+        self.web_modal_queue.push_back(request);
+        if self.active_web_modal.is_none() {
+            self.present_next_web_modal(cx);
+        }
+    }
+
+    fn present_next_web_modal(&mut self, cx: &mut Cx) {
+        let Some(request) = self.web_modal_queue.pop_front() else {
+            self.apply_focus(cx);
+            return;
+        };
+        let input = self.ui.text_input(cx, ids!(web_modal_input));
+        let password = self.ui.text_input(cx, ids!(web_modal_password));
+        match &request {
+            WebModalRequest::JsDialog { req, .. } => {
+                let origin = if req.origin_url.is_empty() {
+                    "Page".to_string()
+                } else {
+                    koma_core::input::derive_url_label(&req.origin_url)
+                };
+                let message = if req.kind == 3 && req.message.is_empty() {
+                    "Changes you made may not be saved.".to_string()
+                } else {
+                    req.message.clone()
+                };
+                self.ui
+                    .label(cx, ids!(web_modal_origin))
+                    .set_text(cx, &origin);
+                self.ui
+                    .label(cx, ids!(web_modal_message))
+                    .set_text(cx, &message);
+                let is_prompt = req.kind == 2;
+                input.set_visible(cx, is_prompt);
+                password.set_visible(cx, false);
+                if is_prompt {
+                    input.set_text(cx, &req.default_prompt);
+                } else {
+                    input.set_text(cx, "");
+                }
+                password.set_text(cx, "");
+                let (title, confirm, cancel) = match req.kind {
+                    0 => ("Alert", "OK", ""),
+                    1 => ("Confirm", "OK", "Cancel"),
+                    2 => ("Prompt", "OK", "Cancel"),
+                    _ => ("Leave page?", "Leave", "Stay"),
+                };
+                self.active_web_modal = Some(request);
+                self.ui
+                    .dialog(cx, ids!(web_modal_dialog))
+                    .ask(cx, title, confirm, cancel);
+                if is_prompt {
+                    input.set_key_focus(cx);
+                }
+            }
+            WebModalRequest::Auth { req, .. } => {
+                let target = if req.is_proxy {
+                    format!("Proxy {}:{}", req.host, req.port)
+                } else {
+                    format!("{}:{}", req.host, req.port)
+                };
+                let origin = if req.realm.is_empty() {
+                    format!("{target} ({})", req.scheme)
+                } else {
+                    format!("{target} — {}", req.realm)
+                };
+                self.ui
+                    .label(cx, ids!(web_modal_origin))
+                    .set_text(cx, &origin);
+                self.ui
+                    .label(cx, ids!(web_modal_message))
+                    .set_text(cx, "Enter your username and password.");
+                input.set_visible(cx, true);
+                input.set_text(cx, "");
+                password.set_visible(cx, true);
+                password.set_text(cx, "");
+                self.active_web_modal = Some(request);
+                self.ui.dialog(cx, ids!(web_modal_dialog)).ask(
+                    cx,
+                    &format!("Sign in to {target}"),
+                    "Sign In",
+                    "Cancel",
+                );
+                input.set_key_focus(cx);
+            }
+        }
+    }
+
+    fn resolve_active_web_modal(&mut self, cx: &mut Cx, accepted: bool) {
+        let Some(request) = self.active_web_modal.take() else {
+            return;
+        };
+        let input_text = self.ui.text_input(cx, ids!(web_modal_input)).text();
+        let password_text = self.ui.text_input(cx, ids!(web_modal_password)).text();
+        match request {
+            WebModalRequest::JsDialog { view_id, req } => {
+                let accept = if req.kind == 0 { true } else { accepted };
+                let user_input = if accept && req.kind == 2 {
+                    input_text
+                } else {
+                    String::new()
+                };
+                self.web_runtime().borrow_mut().resolve_js_dialog(
+                    cx,
+                    view_id,
+                    req.request_id,
+                    accept,
+                    user_input,
+                );
+            }
+            WebModalRequest::Auth { view_id, req } => {
+                let username = accepted.then_some(input_text);
+                self.web_runtime().borrow_mut().resolve_auth_request(
+                    cx,
+                    view_id,
+                    req.request_id,
+                    username,
+                    password_text,
+                );
+            }
+        }
+        self.present_next_web_modal(cx);
     }
 }
 

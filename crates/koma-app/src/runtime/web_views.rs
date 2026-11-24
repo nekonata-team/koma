@@ -9,8 +9,8 @@ use koma_ipc::protocol::{
     IpcPayload, IpcResponse, WebReadData, WebScriptTargetData, WebSnapshotData,
 };
 use makepad_browser_view::{
-    BrowserViews, DownloadRequestEvent, DownloadUpdateEvent, FileDialogEvent, RingShown, ViewId,
-    ViewOp,
+    AuthRequestEvent, BrowserViews, DownloadRequestEvent, DownloadUpdateEvent, FileDialogEvent,
+    JsDialogEvent, RingShown, ViewId, ViewOp,
 };
 use makepad_micro_serde::*;
 use makepad_widgets::*;
@@ -200,6 +200,8 @@ pub struct WebViewRuntime {
     pending_file_dialogs: Vec<(ViewId, FileDialogEvent)>,
     pending_download_requests: Vec<(ViewId, DownloadRequestEvent)>,
     pending_download_updates: Vec<DownloadUpdateEvent>,
+    pending_js_dialogs: Vec<(ViewId, JsDialogEvent)>,
+    pending_auth_requests: Vec<(ViewId, AuthRequestEvent)>,
     pending_closed_komas: Vec<KomaId>,
     koma_api_enabled: HashMap<KomaId, bool>,
     koma_api_injected_url: HashMap<KomaId, String>,
@@ -231,6 +233,8 @@ impl WebViewRuntime {
             pending_file_dialogs: Vec::new(),
             pending_download_requests: Vec::new(),
             pending_download_updates: Vec::new(),
+            pending_js_dialogs: Vec::new(),
+            pending_auth_requests: Vec::new(),
             pending_closed_komas: Vec::new(),
             koma_api_enabled: HashMap::new(),
             koma_api_injected_url: HashMap::new(),
@@ -547,6 +551,52 @@ impl WebViewRuntime {
             ViewOp::DownloadResult {
                 download_id,
                 save_path,
+            },
+        );
+        self.views.service(cx);
+    }
+
+    pub fn take_js_dialogs(&mut self) -> Vec<(ViewId, JsDialogEvent)> {
+        std::mem::take(&mut self.pending_js_dialogs)
+    }
+
+    pub fn resolve_js_dialog(
+        &mut self,
+        cx: &mut Cx,
+        view_id: ViewId,
+        request_id: u64,
+        accept: bool,
+        user_input: String,
+    ) {
+        self.views.send(
+            view_id,
+            ViewOp::JsDialogResult {
+                request_id,
+                accept,
+                user_input,
+            },
+        );
+        self.views.service(cx);
+    }
+
+    pub fn take_auth_requests(&mut self) -> Vec<(ViewId, AuthRequestEvent)> {
+        std::mem::take(&mut self.pending_auth_requests)
+    }
+
+    pub fn resolve_auth_request(
+        &mut self,
+        cx: &mut Cx,
+        view_id: ViewId,
+        request_id: u64,
+        username: Option<String>,
+        password: String,
+    ) {
+        self.views.send(
+            view_id,
+            ViewOp::AuthResult {
+                request_id,
+                username,
+                password,
             },
         );
         self.views.service(cx);
@@ -965,6 +1015,18 @@ impl WebViewRuntime {
                 self.pending_download_updates.extend(download_updates);
                 changed = true;
             }
+            let js_dialogs = self.views.take_js_dialogs(id);
+            if !js_dialogs.is_empty() {
+                self.pending_js_dialogs
+                    .extend(js_dialogs.into_iter().map(|req| (id, req)));
+                changed = true;
+            }
+            let auth_requests = self.views.take_auth_requests(id);
+            if !auth_requests.is_empty() {
+                self.pending_auth_requests
+                    .extend(auth_requests.into_iter().map(|req| (id, req)));
+                changed = true;
+            }
             if self.views.take_closed(id) {
                 if let Some(koma_id) = self.view_to_koma.get(&id).cloned() {
                     self.pending_closed_komas.push(koma_id);
@@ -1011,6 +1073,8 @@ impl WebViewRuntime {
         self.pending_file_dialogs.clear();
         self.pending_download_requests.clear();
         self.pending_download_updates.clear();
+        self.pending_js_dialogs.clear();
+        self.pending_auth_requests.clear();
         self.pending_closed_komas.clear();
         self.koma_api_enabled.clear();
         self.koma_api_injected_url.clear();
