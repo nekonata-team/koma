@@ -1216,6 +1216,8 @@ impl SheetStrip {
             self.scroll_target_x = None;
             return;
         }
+        self.scroll_bars.stop_motion();
+        self.discard_scroll_continuation = true;
         self.scroll_target_x = Some(target_x);
         self.start_animation(cx);
     }
@@ -1496,10 +1498,7 @@ impl Widget for SheetStrip {
         }
 
         let is_scroll = matches!(event, Event::Scroll(_));
-        let horiz_scroll = matches!(
-            event,
-            Event::Scroll(e) if e.scroll.y == 0.0 || e.scroll.x.abs() > e.scroll.y.abs()
-        );
+        let horiz_scroll = matches!(event, Event::Scroll(e) if is_horizontal_scroll(e.scroll));
         if horiz_scroll {
             self.scroll_target_x = None;
         }
@@ -1744,6 +1743,10 @@ impl SheetStrip {
     }
 }
 
+fn is_horizontal_scroll(scroll: Vec2d) -> bool {
+    scroll.x != 0.0 && (scroll.y == 0.0 || scroll.x.abs() > scroll.y.abs())
+}
+
 fn intersect_rect(a: Rect, b: Rect) -> Rect {
     let x1 = a.pos.x.max(b.pos.x);
     let y1 = a.pos.y.max(b.pos.y);
@@ -1879,5 +1882,14 @@ mod tests {
         let old_x = koma_start_x(&before, &"b".into(), STRIP_SPACING).unwrap();
         let new_x = koma_start_x(&after_left_insert, &"b".into(), STRIP_SPACING).unwrap();
         assert_eq!(new_x - old_x, x.width + STRIP_SPACING);
+    }
+
+    #[test]
+    fn zero_delta_scroll_does_not_count_as_horizontal_scroll() {
+        assert!(!is_horizontal_scroll(dvec2(0.0, 0.0)));
+        assert!(!is_horizontal_scroll(dvec2(0.0, 12.0)));
+        assert!(!is_horizontal_scroll(dvec2(3.0, 12.0)));
+        assert!(is_horizontal_scroll(dvec2(12.0, 0.0)));
+        assert!(is_horizontal_scroll(dvec2(-12.0, 4.0)));
     }
 }
