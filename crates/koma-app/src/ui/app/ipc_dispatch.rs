@@ -573,7 +573,7 @@ impl App {
                 let entry = self.state.push_notification(source, title.clone(), &body);
                 self.render_notifications_overlay(cx);
                 self.update_status(cx);
-                self.show_toast(cx, format!("{title}: {body}"));
+                self.show_notification_toast(cx, &entry);
                 let _ = reply.send(IpcResponse::Ok(IpcPayload::NotificationSent {
                     koma_id: entry.koma_id.into_string(),
                     notification_id: entry.id,

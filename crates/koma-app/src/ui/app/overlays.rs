@@ -2,7 +2,7 @@
 
 use koma_app::domain::palette::{candidates, PaletteAction, PaletteItem, MAX_CANDIDATES};
 use koma_core::input::{parse_open_koma_input_with_engine, resolve_web_url_with_engine};
-use koma_core::model::{InputMode, KomaKind};
+use koma_core::model::{InputMode, KomaKind, NotificationEntry};
 use makepad_widgets::*;
 
 use crate::runtime::profiles::{self, Profile};
@@ -11,13 +11,49 @@ use super::{App, PromptMode};
 use crate::ui::sheet_strip::SheetStrip;
 
 impl App {
+    /// Says `msg` in the single result toast, replacing the previous one in place.
     pub(super) fn show_toast(&mut self, cx: &mut Cx, msg: impl Into<String>) {
         let text = msg.into();
-        self.ui.label(cx, ids!(toast_label)).set_text(cx, &text);
-        self.ui.view(cx, ids!(toast_overlay)).set_visible(cx, true);
-        cx.stop_timer(self.toast_timer);
-        self.toast_timer = cx.start_timeout(3.5);
-        self.ui.redraw(cx);
+        self.ui
+            .toaster(cx, ids!(toaster))
+            .show(cx, Toast::new(live_id!(result), &text));
+    }
+
+    /// Raises a toast for `entry` whose action jumps to the source Koma.
+    pub(super) fn show_notification_toast(&mut self, cx: &mut Cx, entry: &NotificationEntry) {
+        let (title, body) = if entry.title.is_empty() {
+            (entry.body.as_str(), "")
+        } else {
+            (entry.title.as_str(), entry.body.as_str())
+        };
+        let toast = Toast::new(LiveId::from_str(&entry.id), title)
+            .body(body)
+            .action("Open")
+            .life(ToastLife::Long);
+        self.ui.toaster(cx, ids!(toaster)).show(cx, toast);
+    }
+
+    /// Focuses the Koma behind the notification toast `id` and marks it read.
+    pub(super) fn focus_toast_notification(&mut self, cx: &mut Cx, id: LiveId) {
+        let Some(notification_id) = self
+            .state
+            .notifications
+            .iter()
+            .find(|n| LiveId::from_str(&n.id) == id)
+            .map(|n| n.id.clone())
+        else {
+            return;
+        };
+        self.ui.toaster(cx, ids!(toaster)).dismiss(cx, id);
+        match self.state.focus_notification_source(Some(&notification_id)) {
+            Ok(_) => {
+                self.state.mode = InputMode::ContentInput;
+                self.sync_after_mutation(cx, true);
+            }
+            Err(err) => self.show_toast(cx, err),
+        }
+        self.render_notifications_overlay(cx);
+        self.update_status(cx);
     }
 
     pub(super) fn render_drawer_overlay(&self, cx: &mut Cx) {

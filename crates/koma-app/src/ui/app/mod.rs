@@ -159,29 +159,6 @@ script_mod! {
                         }
                     }
 
-                    toast_overlay := View{
-                        visible: false
-                        new_batch: true
-                        width: Fill
-                        height: Fill
-                        align: Align{x: 1.0 y: 1.0}
-                        padding: Inset{right: 16 bottom: 16 left: 16 top: 16}
-
-                        toast_card := RoundedView{
-                            width: Fit
-                            height: Fit
-                            padding: Inset{left: 14 right: 14 top: 8 bottom: 8}
-                            draw_bg.color: #x3b1d2e
-                            draw_bg.border_radius: 6.0
-
-                            toast_label := Label{
-                                width: Fit
-                                text: ""
-                                draw_text.color: #xf7768e
-                            }
-                        }
-                    }
-
                     close_sheet_dialog := DangerDialog{
                         size: Sm
                         content +: {
@@ -193,6 +170,8 @@ script_mod! {
                             }
                         }
                     }
+
+                    toaster := Toaster{place: BottomEnd}
                 }
             }
         }
@@ -283,8 +262,6 @@ pub struct App {
     palette_items: Vec<PaletteItem>,
     #[rust]
     palette_selected: usize,
-    #[rust]
-    toast_timer: Timer,
     #[rust]
     window_focused: bool,
     #[rust]
@@ -1062,18 +1039,14 @@ impl MatchEvent for App {
         self.init_runtime(cx);
     }
 
-    fn handle_timer(&mut self, cx: &mut Cx, event: &TimerEvent) {
-        if self
-            .toast_timer
-            .is_event(&Event::Timer(event.clone()))
-            .is_some()
-        {
-            self.ui.view(cx, ids!(toast_overlay)).set_visible(cx, false);
-            self.ui.redraw(cx);
-        }
-    }
-
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        for id in toast_actions(actions).filter_map(|a| match a {
+            ToastAction::ActionPressed(id) => Some(*id),
+            _ => None,
+        }) {
+            self.focus_toast_notification(cx, id);
+        }
+
         let close_dialog = self.ui.dialog(cx, ids!(close_sheet_dialog));
         if close_dialog.confirmed(actions) {
             if let Err(err) = self.close_current_sheet(cx) {
@@ -1120,11 +1093,14 @@ impl MatchEvent for App {
                         .and_then(|strip| strip.koma_id_for_widget_uid(widget_action.widget_uid))
                         .or_else(|| self.state.focused_koma().map(|b| b.id.clone()))
                         .unwrap_or_else(|| "terminal".into());
-                    self.state
-                        .push_notification(source_id, "Terminal Bell", "Attention requested");
+                    let entry = self.state.push_notification(
+                        source_id,
+                        "Terminal Bell",
+                        "Attention requested",
+                    );
                     self.render_notifications_overlay(cx);
                     self.update_status(cx);
-                    self.show_toast(cx, "Terminal Bell");
+                    self.show_notification_toast(cx, &entry);
                 }
                 MpTermAction::Notification { title, body } => {
                     let source_id = self
@@ -1134,17 +1110,10 @@ impl MatchEvent for App {
                         .and_then(|strip| strip.koma_id_for_widget_uid(widget_action.widget_uid))
                         .or_else(|| self.state.focused_koma().map(|b| b.id.clone()))
                         .unwrap_or_else(|| "terminal".into());
-                    let summary = if title.is_empty() {
-                        body.clone()
-                    } else if body.is_empty() {
-                        title.clone()
-                    } else {
-                        format!("{title}: {body}")
-                    };
-                    self.state.push_notification(source_id, title, body);
+                    let entry = self.state.push_notification(source_id, title, body);
                     self.render_notifications_overlay(cx);
                     self.update_status(cx);
-                    self.show_toast(cx, summary);
+                    self.show_notification_toast(cx, &entry);
                 }
                 action @ (MpTermAction::TitleChanged(_) | MpTermAction::PwdChanged(_)) => {
                     let (label, cwd) = match action {
@@ -1440,7 +1409,7 @@ impl AppMain for App {
                     .is_none_or(|previous| previous.elapsed() >= std::time::Duration::from_secs(4))
             {
                 self.last_web_toast = Some(std::time::Instant::now());
-                self.show_toast(cx, format!("{}: {}", newest.title, newest.body));
+                self.show_notification_toast(cx, &newest);
             }
         }
         let koma_api_events = self.web_runtime().borrow_mut().take_koma_api_events();
