@@ -184,10 +184,12 @@ script_mod! {
 
                     close_sheet_dialog := DangerDialog{
                         size: Sm
-                        body +: {
-                            close_sheet_dialog_body := Label{
-                                width: Fill
-                                text: ""
+                        content +: {
+                            body +: {
+                                close_sheet_dialog_body := Label{
+                                    width: Fill
+                                    text: ""
+                                }
                             }
                         }
                     }
