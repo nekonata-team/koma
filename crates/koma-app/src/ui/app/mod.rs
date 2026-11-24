@@ -256,6 +256,8 @@ pub struct App {
     #[rust]
     suppress_text_input: bool,
     #[rust]
+    handled_keys: Vec<KeyCode>,
+    #[rust]
     pending_focus_sync: bool,
     #[rust]
     sock_path: String,
@@ -1236,6 +1238,22 @@ impl AppMain for App {
 
         self.drain_ipc(cx);
 
+        match event {
+            Event::WindowLostFocus(_) => self.handled_keys.clear(),
+            Event::KeyUp(key) => {
+                self.suppress_text_input = false;
+                if let Some(index) = self
+                    .handled_keys
+                    .iter()
+                    .position(|code| *code == key.key_code)
+                {
+                    self.handled_keys.swap_remove(index);
+                    return;
+                }
+            }
+            _ => {}
+        }
+
         let dialog_open = self.ui.dialog(cx, ids!(close_sheet_dialog)).is_open();
 
         if !dialog_open {
@@ -1280,7 +1298,11 @@ impl AppMain for App {
                     Self::map_key(ke),
                     &self.config.keybindings,
                 );
-                if !matches!(decision, RouteDecision::Forward) {
+                let already_handled = self.handled_keys.contains(&ke.key_code);
+                if already_handled || !matches!(decision, RouteDecision::Forward) {
+                    if !already_handled {
+                        self.handled_keys.push(ke.key_code);
+                    }
                     self.suppress_text_input = !ke.modifiers.control
                         && !ke.modifiers.alt
                         && !ke.modifiers.logo
@@ -1291,10 +1313,6 @@ impl AppMain for App {
                     self.execute_route(cx, decision);
                     return;
                 }
-            }
-
-            if let Event::KeyUp(_) = event {
-                self.suppress_text_input = false;
             }
 
             if let Event::TextInput(_) = event {

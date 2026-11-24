@@ -12,6 +12,7 @@ use koma_core::model::{
 };
 use makepad_app_terminal::term::color::Rgb;
 use makepad_app_terminal::widget::{MpTerm, TerminalColors};
+use makepad_widgets::event::ScrollPhase;
 use makepad_widgets::makepad_draw::DrawList2d;
 use makepad_widgets::turtle::RowAlign;
 use makepad_widgets::*;
@@ -316,6 +317,8 @@ pub struct SheetStrip {
     #[rust]
     scroll_target_x: Option<f64>,
     #[rust]
+    discard_scroll_continuation: bool,
+    #[rust]
     center_focused: CenterFocused,
     #[rust(STRIP_SPACING)]
     koma_gap: f64,
@@ -413,6 +416,10 @@ impl SheetStrip {
             .get(prev_active)
             .zip(state.sheets().get(self.active_sheet))
             .filter(|(old, new)| old.sheet_id == new.id);
+        if prev_sheet_id.is_some() && same_sheet.is_none() {
+            self.scroll_bars.stop_motion();
+            self.discard_scroll_continuation = true;
+        }
         let same_order = same_sheet.is_some_and(|(old, new)| {
             old.komas
                 .iter()
@@ -1179,6 +1186,21 @@ impl Widget for SheetStrip {
                 self.redraw(cx);
             }
             return;
+        }
+
+        if let Event::Scroll(scroll) = event {
+            match scroll.phase {
+                ScrollPhase::Began => self.discard_scroll_continuation = false,
+                ScrollPhase::Changed
+                | ScrollPhase::Ended
+                | ScrollPhase::Momentum
+                | ScrollPhase::MomentumEnded
+                    if self.discard_scroll_continuation =>
+                {
+                    return;
+                }
+                _ => {}
+            }
         }
 
         if self.animating {
