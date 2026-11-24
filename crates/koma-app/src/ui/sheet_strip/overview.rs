@@ -1,11 +1,12 @@
 use std::collections::HashSet;
 
-use koma_core::model::{InputMode, KomaKind};
+use koma_core::model::{InputMode, KomaId, KomaKind};
+use makepad_widgets::makepad_draw::DrawList2d;
 use makepad_widgets::*;
 
 use super::{
-    intersect_rect, BgKind, BgPanDrag, KomaSlot, OverviewCardHit, OverviewDrag, SheetStrip,
-    SheetStripAction, DEFAULT_OVERVIEW_SCALE, DRAG_THRESHOLD_PX, OVERVIEW_RENDER_EPS,
+    KomaSlot, SheetStrip, SheetStripAction, DEFAULT_OVERVIEW_SCALE, DRAG_THRESHOLD_PX,
+    OVERVIEW_RENDER_EPS,
 };
 
 const SHEET_GAP: f64 = 72.0;
@@ -16,26 +17,119 @@ const CANVAS_ROOT_SIZE: f64 = 65536.0;
 const MIN_OVERVIEW_SCALE: f64 = 0.25;
 const MAX_OVERVIEW_SCALE: f64 = 0.85;
 const OVERVIEW_SCALE_STEP: f64 = 0.08;
-const OVERVIEW_SNAP_T_EPS: f64 = 0.004;
+pub(super) const OVERVIEW_SNAP_T_EPS: f64 = 0.004;
+
+#[derive(Clone, Debug)]
+struct OverviewCardHit {
+    sheet_idx: usize,
+    koma_id: KomaId,
+    world_rect: Rect,
+}
+
+#[derive(Clone, Debug)]
+struct OverviewDrag {
+    koma_id: KomaId,
+    origin_sheet: usize,
+    start_abs: Vec2d,
+    active: bool,
+    drop_target: Option<(usize, usize)>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum BgKind {
+    Sheet(usize),
+    Outer,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BgPanDrag {
+    kind: BgKind,
+    start_abs: Vec2d,
+    last_abs: Vec2d,
+    moved: bool,
+}
+
+pub(super) struct OverviewState {
+    draw_list: Option<DrawList2d>,
+    pub(super) t: f64,
+    scale: f64,
+    pub(super) cam_scale: f64,
+    pub(super) cam_x: f64,
+    pub(super) cam_y: f64,
+    pub(super) cam_pan_offset: Vec2d,
+    last_transform: (f64, f64, f64),
+    card_rects: Vec<OverviewCardHit>,
+    sheet_rects: Vec<(usize, Rect)>,
+    hovered_koma: Option<KomaId>,
+    drag: Option<OverviewDrag>,
+    bg_pan_drag: Option<BgPanDrag>,
+}
+
+impl Default for OverviewState {
+    fn default() -> Self {
+        Self {
+            draw_list: None,
+            t: 0.0,
+            scale: DEFAULT_OVERVIEW_SCALE,
+            cam_scale: 1.0,
+            cam_x: 0.0,
+            cam_y: 0.0,
+            cam_pan_offset: dvec2(0.0, 0.0),
+            last_transform: (1.0, 0.0, 0.0),
+            card_rects: Vec::new(),
+            sheet_rects: Vec::new(),
+            hovered_koma: None,
+            drag: None,
+            bg_pan_drag: None,
+        }
+    }
+}
+
+impl OverviewState {
+    pub(super) fn clear_interaction(&mut self) {
+        self.hovered_koma = None;
+        self.drag = None;
+        self.bg_pan_drag = None;
+        self.cam_pan_offset = dvec2(0.0, 0.0);
+    }
+
+    pub(super) fn remove_koma(&mut self, koma_id: &KomaId) {
+        self.card_rects.retain(|c| &c.koma_id != koma_id);
+        if self.hovered_koma.as_ref() == Some(koma_id) {
+            self.hovered_koma = None;
+        }
+    }
+}
+
+fn intersect_rect(a: Rect, b: Rect) -> Rect {
+    let x1 = a.pos.x.max(b.pos.x);
+    let y1 = a.pos.y.max(b.pos.y);
+    let x2 = (a.pos.x + a.size.x).min(b.pos.x + b.size.x);
+    let y2 = (a.pos.y + a.size.y).min(b.pos.y + b.size.y);
+    Rect {
+        pos: dvec2(x1, y1),
+        size: dvec2((x2 - x1).max(0.0), (y2 - y1).max(0.0)),
+    }
+}
 
 impl SheetStrip {
     pub fn is_overview_rendered(&self) -> bool {
-        self.mode == InputMode::Overview || self.overview_t > OVERVIEW_RENDER_EPS
+        self.mode == InputMode::Overview || self.overview.t > OVERVIEW_RENDER_EPS
     }
 
     pub fn adjust_overview_zoom(&mut self, cx: &mut Cx, delta_step: isize) {
-        let next = (self.overview_scale + delta_step as f64 * OVERVIEW_SCALE_STEP)
+        let next = (self.overview.scale + delta_step as f64 * OVERVIEW_SCALE_STEP)
             .clamp(MIN_OVERVIEW_SCALE, MAX_OVERVIEW_SCALE);
-        if (next - self.overview_scale).abs() < 0.001 {
+        if (next - self.overview.scale).abs() < 0.001 {
             return;
         }
-        self.overview_scale = next;
+        self.overview.scale = next;
         self.start_animation(cx);
     }
 
     pub fn reset_overview_zoom(&mut self, cx: &mut Cx) {
-        self.overview_scale = DEFAULT_OVERVIEW_SCALE;
-        self.cam_pan_offset = dvec2(0.0, 0.0);
+        self.overview.scale = DEFAULT_OVERVIEW_SCALE;
+        self.overview.cam_pan_offset = dvec2(0.0, 0.0);
         self.start_animation(cx);
     }
 
@@ -47,7 +141,7 @@ impl SheetStrip {
         sheet_idx as f64 * Self::sheet_row_step(viewport_h)
     }
 
-    fn overview_camera_target(&self) -> (f64, f64, f64, f64) {
+    pub(super) fn overview_camera_target(&self) -> (f64, f64, f64, f64) {
         let vp = self.effective_viewport_size();
         if self.mode != InputMode::Overview {
             let scroll_x = self.scroll_bars.get_scroll_pos().x;
@@ -57,7 +151,8 @@ impl SheetStrip {
         }
 
         let s = self
-            .overview_scale
+            .overview
+            .scale
             .clamp(MIN_OVERVIEW_SCALE, MAX_OVERVIEW_SCALE);
         let vis_w = vp.x / s;
         let vis_h = vp.y / s;
@@ -88,88 +183,13 @@ impl SheetStrip {
         (
             1.0,
             s,
-            base_x + self.cam_pan_offset.x,
-            base_y + self.cam_pan_offset.y,
+            base_x + self.overview.cam_pan_offset.x,
+            base_y + self.overview.cam_pan_offset.y,
         )
     }
 
-    pub(super) fn start_animation(&mut self, cx: &mut Cx) {
-        self.animating = true;
-        self.last_frame_time = None;
-        self.next_frame = cx.new_next_frame();
-        self.redraw(cx);
-    }
-
-    pub(super) fn step_animation(&mut self, cx: &mut Cx, time: f64) {
-        let dt = self
-            .last_frame_time
-            .map(|prev| (time - prev).clamp(0.001, 0.05))
-            .unwrap_or(1.0 / 60.0);
-        self.last_frame_time = Some(time);
-        self.close_gaps.retain(|_, gap| gap.advance(dt));
-        self.trailing_close_gap.take_if(|gap| !gap.advance(dt));
-        self.reorder_slide.take_if(|slide| !slide.advance(dt));
-
-        let (target_t, target_scale, target_x, target_y) = self.overview_camera_target();
-        let k = 1.0 - (-18.0 * dt).exp();
-
-        if let Some(target_sx) = self.scroll_target_x {
-            let cur_sx = self.scroll_bars.get_scroll_pos().x;
-            let next_sx = cur_sx + (target_sx - cur_sx) * k;
-            if (next_sx - target_sx).abs() < 1.0 {
-                let _ = self
-                    .scroll_bars
-                    .set_scroll_pos_no_clip(cx, dvec2(target_sx, 0.0));
-                self.scroll_target_x = None;
-            } else {
-                let _ = self
-                    .scroll_bars
-                    .set_scroll_pos_no_clip(cx, dvec2(next_sx, 0.0));
-            }
-        }
-
-        if let Some(mut slide) = self.sheet_slide.take() {
-            slide.offset_y += (0.0 - slide.offset_y) * k;
-            if slide.offset_y.abs() < 1.5 {
-                self.hide_sheet_webviews(cx, &slide.prev_sheet_id);
-            } else {
-                self.sheet_slide = Some(slide);
-            }
-        }
-
-        self.overview_t += (target_t - self.overview_t) * k;
-        self.cam_scale += (target_scale - self.cam_scale) * k;
-        self.cam_x += (target_x - self.cam_x) * k;
-        self.cam_y += (target_y - self.cam_y) * k;
-
-        let settled = self.close_gaps.is_empty()
-            && self.trailing_close_gap.is_none()
-            && self.reorder_slide.is_none()
-            && self.scroll_target_x.is_none()
-            && self.sheet_slide.is_none()
-            && (self.overview_t - target_t).abs() < OVERVIEW_SNAP_T_EPS
-            && (self.cam_scale - target_scale).abs() < OVERVIEW_SNAP_T_EPS
-            && (self.cam_x - target_x).abs() < 1.5
-            && (self.cam_y - target_y).abs() < 1.5;
-
-        if settled {
-            self.overview_t = target_t;
-            self.cam_scale = target_scale;
-            self.cam_x = target_x;
-            self.cam_y = target_y;
-            self.animating = false;
-            self.last_frame_time = None;
-            if self.mode != InputMode::Overview {
-                cx.widget_action(self.uid, SheetStripAction::OverviewSettled);
-            }
-        } else {
-            self.next_frame = cx.new_next_frame();
-        }
-        self.redraw(cx);
-    }
-
     fn screen_to_world(&self, abs: Vec2d) -> Vec2d {
-        let (s, tx, ty) = self.last_transform;
+        let (s, tx, ty) = self.overview.last_transform;
         let inv = 1.0 / s.max(0.05);
         dvec2(
             (abs.x - tx) * inv - CANVAS_ORIGIN,
@@ -208,25 +228,25 @@ impl SheetStrip {
         let viewport = cx.walk_turtle(walk);
         self.last_viewport = viewport;
         self.draw_overview_bg.draw_abs(cx, viewport);
-        self.overview_card_rects.clear();
-        self.overview_sheet_rects.clear();
+        self.overview.card_rects.clear();
+        self.overview.sheet_rects.clear();
 
         if viewport.size.x <= 1.0 || viewport.size.y <= 1.0 {
             return DrawStep::done();
         }
         self.refresh_slot_widths(viewport.size.x);
 
-        if !self.animating && self.mode == InputMode::Overview {
+        if !self.anim.animating && self.mode == InputMode::Overview {
             let (_, ts, tx_c, ty_c) = self.overview_camera_target();
-            self.cam_scale = ts;
-            self.cam_x = tx_c;
-            self.cam_y = ty_c;
+            self.overview.cam_scale = ts;
+            self.overview.cam_x = tx_c;
+            self.overview.cam_y = ty_c;
         }
 
-        let s = self.cam_scale.max(0.05);
-        let tx = viewport.pos.x + viewport.size.x * 0.5 - (self.cam_x + CANVAS_ORIGIN) * s;
-        let ty = viewport.pos.y + viewport.size.y * 0.5 - (self.cam_y + CANVAS_ORIGIN) * s;
-        self.last_transform = (s, tx, ty);
+        let s = self.overview.cam_scale.max(0.05);
+        let tx = viewport.pos.x + viewport.size.x * 0.5 - (self.overview.cam_x + CANVAS_ORIGIN) * s;
+        let ty = viewport.pos.y + viewport.size.y * 0.5 - (self.overview.cam_y + CANVAS_ORIGIN) * s;
+        self.overview.last_transform = (s, tx, ty);
 
         let local_clip = Rect {
             pos: dvec2((viewport.pos.x - tx) / s, (viewport.pos.y - ty) / s),
@@ -238,7 +258,8 @@ impl SheetStrip {
         };
 
         let mut draw_list = self
-            .overview_draw_list
+            .overview
+            .draw_list
             .take()
             .unwrap_or_else(|| DrawList2d::new(cx));
         draw_list.begin_always(cx);
@@ -250,8 +271,8 @@ impl SheetStrip {
 
         let card_h = (viewport.size.y - 2.0 * self.koma_gap).max(160.0);
         let sheets = self.sheets.clone();
-        let active_drag = self.overview_drag.clone().filter(|d| d.active);
-        let hovered_id = self.hovered_koma.clone();
+        let active_drag = self.overview.drag.clone().filter(|d| d.active);
+        let hovered_id = self.overview.hovered_koma.clone();
         let mut visible_web_ids = HashSet::new();
 
         for (sheet_idx, sheet) in sheets.iter().enumerate() {
@@ -268,14 +289,15 @@ impl SheetStrip {
                 pos: dvec2(0.0, sheet_y),
                 size: dvec2(row_w, viewport.size.y),
             };
-            self.overview_sheet_rects
+            self.overview
+                .sheet_rects
                 .push((sheet_idx, sheet_world_rect));
 
             let sheet_local_rect = Rect {
                 pos: dvec2(CANVAS_ORIGIN, CANVAS_ORIGIN + sheet_y),
                 size: dvec2(row_w, viewport.size.y),
             };
-            if is_active_sheet && self.overview_t > 0.05 {
+            if is_active_sheet && self.overview.t > 0.05 {
                 let frame = Rect {
                     pos: sheet_local_rect.pos - dvec2(4.0, 4.0),
                     size: sheet_local_rect.size + dvec2(8.0, 8.0),
@@ -290,7 +312,7 @@ impl SheetStrip {
             };
             self.draw_sheet_bg.draw_abs(cx, sheet_local_rect);
 
-            if self.overview_t > 0.05 {
+            if self.overview.t > 0.05 {
                 let label_pos = dvec2(
                     CANVAS_ORIGIN + 6.0,
                     CANVAS_ORIGIN + sheet_y - SHEET_LABEL_OFFSET_Y,
@@ -341,7 +363,7 @@ impl SheetStrip {
                         scope,
                         &selected_or_hovered,
                         card_walk,
-                        self.overview_t > 0.05,
+                        self.overview.t > 0.05,
                         is_hovered,
                     );
                     if slot.kind == KomaKind::Web {
@@ -349,7 +371,7 @@ impl SheetStrip {
                     }
                     cx.pop_clip_rect();
                 }
-                self.overview_card_rects.push(OverviewCardHit {
+                self.overview.card_rects.push(OverviewCardHit {
                     sheet_idx,
                     koma_id: slot.koma_id.clone(),
                     world_rect: Rect {
@@ -401,7 +423,7 @@ impl SheetStrip {
         mat.v[12] = tx as f32;
         mat.v[13] = ty as f32;
         draw_list.set_view_transform(cx, &mat);
-        self.overview_draw_list = Some(draw_list);
+        self.overview.draw_list = Some(draw_list);
 
         DrawStep::done()
     }
@@ -410,7 +432,7 @@ impl SheetStrip {
         let area_rect = self.draw_strip_bg.area().rect(cx);
         match event {
             Event::MouseMove(me) => {
-                if let Some(mut drag) = self.overview_drag.take() {
+                if let Some(mut drag) = self.overview.drag.take() {
                     if !drag.active && (me.abs - drag.start_abs).length() > DRAG_THRESHOLD_PX {
                         drag.active = true;
                     }
@@ -419,45 +441,48 @@ impl SheetStrip {
                         drag.drop_target = self.compute_drop_target(world);
                         self.redraw(cx);
                     }
-                    self.overview_drag = Some(drag);
+                    self.overview.drag = Some(drag);
                     return;
                 }
-                if let Some(mut pan) = self.bg_pan_drag.take() {
+                if let Some(mut pan) = self.overview.bg_pan_drag.take() {
                     let delta = me.abs - pan.last_abs;
                     if !pan.moved && (me.abs - pan.start_abs).length() > DRAG_THRESHOLD_PX {
                         pan.moved = true;
                     }
                     if pan.moved {
-                        let scale = self.cam_scale.max(0.1);
-                        self.cam_pan_offset.x =
-                            (self.cam_pan_offset.x - delta.x / scale).clamp(-4000.0, 4000.0);
-                        self.cam_pan_offset.y =
-                            (self.cam_pan_offset.y - delta.y / scale).clamp(-4000.0, 4000.0);
+                        let scale = self.overview.cam_scale.max(0.1);
+                        self.overview.cam_pan_offset.x = (self.overview.cam_pan_offset.x
+                            - delta.x / scale)
+                            .clamp(-4000.0, 4000.0);
+                        self.overview.cam_pan_offset.y = (self.overview.cam_pan_offset.y
+                            - delta.y / scale)
+                            .clamp(-4000.0, 4000.0);
                         self.redraw(cx);
                     }
                     pan.last_abs = me.abs;
-                    self.bg_pan_drag = Some(pan);
+                    self.overview.bg_pan_drag = Some(pan);
                     return;
                 }
                 if area_rect.contains(me.abs) {
                     let world = self.screen_to_world(me.abs);
                     let next_hover = self
-                        .overview_card_rects
+                        .overview
+                        .card_rects
                         .iter()
                         .find(|c| c.world_rect.contains(world))
                         .map(|c| c.koma_id.clone());
-                    if next_hover != self.hovered_koma {
-                        self.hovered_koma = next_hover;
+                    if next_hover != self.overview.hovered_koma {
+                        self.overview.hovered_koma = next_hover;
                         self.redraw(cx);
                     }
-                } else if self.hovered_koma.take().is_some() {
+                } else if self.overview.hovered_koma.take().is_some() {
                     self.redraw(cx);
                 }
             }
             Event::MouseDown(me) if area_rect.contains(me.abs) => {
                 let world = self.screen_to_world(me.abs);
                 if me.button.is_secondary() {
-                    self.bg_pan_drag = Some(BgPanDrag {
+                    self.overview.bg_pan_drag = Some(BgPanDrag {
                         kind: BgKind::Outer,
                         start_abs: me.abs,
                         last_abs: me.abs,
@@ -466,11 +491,12 @@ impl SheetStrip {
                     return;
                 }
                 if let Some(card) = self
-                    .overview_card_rects
+                    .overview
+                    .card_rects
                     .iter()
                     .find(|c| c.world_rect.contains(world))
                 {
-                    self.overview_drag = Some(OverviewDrag {
+                    self.overview.drag = Some(OverviewDrag {
                         koma_id: card.koma_id.clone(),
                         origin_sheet: card.sheet_idx,
                         start_abs: me.abs,
@@ -480,12 +506,13 @@ impl SheetStrip {
                     return;
                 }
                 let kind = self
-                    .overview_sheet_rects
+                    .overview
+                    .sheet_rects
                     .iter()
                     .find(|(_, r)| r.contains(world))
                     .map(|(di, _)| BgKind::Sheet(*di))
                     .unwrap_or(BgKind::Outer);
-                self.bg_pan_drag = Some(BgPanDrag {
+                self.overview.bg_pan_drag = Some(BgPanDrag {
                     kind,
                     start_abs: me.abs,
                     last_abs: me.abs,
@@ -493,7 +520,7 @@ impl SheetStrip {
                 });
             }
             Event::MouseUp(me) => {
-                if let Some(drag) = self.overview_drag.take() {
+                if let Some(drag) = self.overview.drag.take() {
                     if drag.active {
                         if let Some((target_sheet, target_index)) = drag.drop_target {
                             cx.widget_action(
@@ -510,7 +537,8 @@ impl SheetStrip {
                     }
                     let world = self.screen_to_world(me.abs);
                     if let Some(hit) = self
-                        .overview_card_rects
+                        .overview
+                        .card_rects
                         .iter()
                         .find(|c| c.world_rect.contains(world))
                     {
@@ -532,7 +560,7 @@ impl SheetStrip {
                     }
                     return;
                 }
-                if let Some(pan) = self.bg_pan_drag.take() {
+                if let Some(pan) = self.overview.bg_pan_drag.take() {
                     if !pan.moved {
                         match pan.kind {
                             BgKind::Sheet(sheet_idx) => {
@@ -555,15 +583,15 @@ impl SheetStrip {
                 se.handled_x.set(true);
                 se.handled_y.set(true);
                 if se.modifiers.logo || se.modifiers.control {
-                    self.overview_scale = (self.overview_scale * (1.0 - se.scroll.y * 0.002))
+                    self.overview.scale = (self.overview.scale * (1.0 - se.scroll.y * 0.002))
                         .clamp(MIN_OVERVIEW_SCALE, MAX_OVERVIEW_SCALE);
-                    self.cam_scale = self.overview_scale;
+                    self.overview.cam_scale = self.overview.scale;
                 } else {
-                    let s = self.cam_scale.max(0.1);
-                    self.cam_pan_offset.x =
-                        (self.cam_pan_offset.x + se.scroll.x / s).clamp(-4000.0, 4000.0);
-                    self.cam_pan_offset.y =
-                        (self.cam_pan_offset.y + se.scroll.y / s).clamp(-4000.0, 4000.0);
+                    let s = self.overview.cam_scale.max(0.1);
+                    self.overview.cam_pan_offset.x =
+                        (self.overview.cam_pan_offset.x + se.scroll.x / s).clamp(-4000.0, 4000.0);
+                    self.overview.cam_pan_offset.y =
+                        (self.overview.cam_pan_offset.y + se.scroll.y / s).clamp(-4000.0, 4000.0);
                 }
                 self.redraw(cx);
             }
