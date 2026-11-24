@@ -39,6 +39,9 @@ Koma Mode では `h` / `l` で隣の Koma にフォーカスを移し、`j` / `k
 `Esc` でターミナルや Web ページへの入力に戻ります。
 `a` で Koma を Drawer に退避し、`Tab` で Drawer を開けます。
 
+Koma の上でトラックパッドをピンチすると、Terminal は文字サイズが変わり、Web はページのレイアウトを保ったままポインタ付近を拡大・縮小します。
+Koma の枠は変わりません。
+
 Palette の `> Reopen closed Koma` または Koma Mode の `u` で、閉じた Koma を開き直せます。
 端末は最後に保存した作業ディレクトリで新しいシェルを開きます。
 Web Koma は最後に保存した URL を開きます。

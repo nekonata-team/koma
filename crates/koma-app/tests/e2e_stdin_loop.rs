@@ -343,7 +343,7 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
                 panic!("expected terminal text")
             };
             if text.contains(expected) {
-                break;
+                break text;
             }
             assert!(
                 Instant::now() < deadline,
@@ -370,6 +370,61 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
     wait_for_text("THIRD-CHECK");
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
+        use makepad_studio_protocol::{PinchPhase, RemotePinch};
+
+        let grid = |mark: &str| -> Vec<usize> {
+            ipc(IpcCommand::TerminalRun(input(&format!(
+                "printf '%s%s ' GRID- {mark}; stty size"
+            ))))
+            .unwrap();
+            let prefix = format!("GRID-{mark} ");
+            wait_for_text(&prefix)
+                .lines()
+                .find_map(|line| line.trim_start().strip_prefix(&prefix))
+                .unwrap()
+                .split_whitespace()
+                .map(|n| n.parse().unwrap())
+                .collect()
+        };
+        let base = grid("BASE");
+        assert_eq!(base.len(), 2);
+        let pinch = |phase, x, scale, time| {
+            StudioToApp::Pinch(RemotePinch {
+                phase,
+                x,
+                y: 300.0,
+                scale,
+                time,
+                ..Default::default()
+            })
+        };
+        send_batch(
+            &sender,
+            vec![
+                pinch(PinchPhase::Begin, 450.0, 1.0, 2.0),
+                // The pointer leaving the terminal does not retarget an active pinch.
+                pinch(PinchPhase::Update, 1270.0, 1.5, 2.1),
+                pinch(PinchPhase::End, 1270.0, 1.0, 2.2),
+                StudioToApp::Tick,
+            ],
+        );
+        let large = grid("LARGE");
+        assert_eq!(large.len(), 2);
+        assert!(
+            large[0] < base[0] && large[1] < base[1],
+            "{large:?} vs {base:?}"
+        );
+        send_batch(
+            &sender,
+            vec![
+                pinch(PinchPhase::Begin, 450.0, 1.0, 2.3),
+                pinch(PinchPhase::Update, 450.0, 2.0 / 3.0, 2.4),
+                pinch(PinchPhase::End, 450.0, 1.0, 2.5),
+                StudioToApp::Tick,
+            ],
+        );
+        assert_eq!(grid("SHRUNK"), base);
+
         let reported_cwd = tmp.join("terminal cwd");
         std::fs::create_dir(&reported_cwd).unwrap();
         let reported_uri =
@@ -446,7 +501,99 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         std::thread::sleep(Duration::from_millis(50));
     }
 
+    if std::env::var_os("KOMA_E2E_WEB_ZOOM").is_some() {
+        std::thread::scope(|scope| {
+            let (stop, stopped) = std::sync::mpsc::channel::<()>();
+            let tick_sender = sender.clone();
+            scope.spawn(move || {
+                while stopped.recv_timeout(Duration::from_millis(16))
+                    == Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                {
+                    send_batch(&tick_sender, vec![StudioToApp::Tick]);
+                }
+            });
+            verify_web_zoom(&sender, &ipc, &koma_id, &tmp);
+            drop(stop);
+        });
+    }
+
     send_batch(&sender, vec![StudioToApp::Kill]);
     drop(child);
     let _ = std::fs::remove_dir_all(&tmp);
+}
+
+// With the CEF distribution and browser host installed: KOMA_E2E_WEB_ZOOM=1 just test.
+fn verify_web_zoom(
+    sender: &std::sync::mpsc::Sender<Vec<u8>>,
+    ipc: &impl Fn(IpcCommand) -> Result<IpcPayload, String>,
+    terminal: &str,
+    tmp: &std::path::Path,
+) {
+    use koma_ipc::protocol::WebEvalArgs;
+    use makepad_studio_protocol::{PinchPhase, RemotePinch};
+
+    ipc(IpcCommand::KomaClose {
+        koma_id: terminal.into(),
+    })
+    .unwrap();
+    let html = tmp.join("zoom.html");
+    std::fs::write(&html, "<!doctype html><title>Zoom test</title>").unwrap();
+    let new_page = || {
+        let IpcPayload::WebKoma(web) = ipc(IpcCommand::WebNew {
+            url: html.display().to_string(),
+            koma_api: false,
+        })
+        .unwrap() else {
+            panic!("expected Web Koma ID")
+        };
+        web.koma_id
+    };
+    let a = new_page();
+    let b = new_page();
+    let wait_number = |id: &str, expr: &str, accept: &dyn Fn(f64) -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let outcome = ipc(IpcCommand::WebEval(WebEvalArgs {
+                koma_id: Some(id.into()),
+                script: format!("document.title === 'Zoom test' ? ({expr}) : null"),
+            }));
+            if let Ok(IpcPayload::WebEval { value, .. }) = &outcome {
+                if let Ok(number) = value.parse::<f64>() {
+                    if accept(number) {
+                        return number;
+                    }
+                }
+            }
+            assert!(Instant::now() < deadline, "{id} {expr}: {outcome:?}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    let width = wait_number(&a, "innerWidth", &|_| true);
+    let base = wait_number(&b, "visualViewport.scale", &|_| true);
+    let pinch = |scale| {
+        let event = |phase, scale| {
+            StudioToApp::Pinch(RemotePinch {
+                phase,
+                scale,
+                x: 280.0,
+                y: 300.0,
+                time: 5.0,
+                ..Default::default()
+            })
+        };
+        send_batch(sender, vec![event(PinchPhase::Begin, 1.0)]);
+        for _ in 0..7 {
+            send_batch(sender, vec![event(PinchPhase::Update, scale)]);
+            std::thread::sleep(Duration::from_millis(16));
+        }
+        send_batch(sender, vec![event(PinchPhase::End, 1.0)]);
+    };
+    pinch(1.13);
+    let enlarged = wait_number(&a, "visualViewport.scale", &|scale| scale > 1.1);
+    assert_eq!(wait_number(&a, "innerWidth", &|_| true), width);
+    assert_eq!(wait_number(&b, "visualViewport.scale", &|_| true), base);
+    assert!(wait_number(&a, "visualViewport.offsetLeft", &|_| true) > 20.0);
+    assert!(wait_number(&a, "visualViewport.offsetTop", &|_| true) > 20.0);
+    pinch(0.86);
+    wait_number(&a, "visualViewport.scale", &|scale| scale < enlarged - 0.1);
 }

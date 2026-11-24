@@ -1255,6 +1255,18 @@ impl AppMain for App {
         }
 
         let dialog_open = self.ui.dialog(cx, ids!(close_sheet_dialog)).is_open();
+        if matches!(event, Event::Pinch(_))
+            && (dialog_open || self.current_overlay() != OverlayKind::None)
+        {
+            if let Some(mut strip) = self
+                .ui
+                .widget(cx, ids!(sheet_strip))
+                .borrow_mut::<SheetStrip>()
+            {
+                strip.end_content_pinch(cx);
+            }
+            return;
+        }
 
         if !dialog_open {
             if let Event::KeyDown(ke) = event {

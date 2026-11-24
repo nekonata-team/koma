@@ -78,6 +78,17 @@ impl WebKoma {
             .map(|rt| f(&mut rt.borrow_mut()))
     }
 
+    pub fn send_view_op(&self, cx: &mut Cx, op: ViewOp) -> bool {
+        self.with_runtime(|rt| {
+            let Some(id) = self.koma_id.as_ref().and_then(|id| rt.view_id(id)) else {
+                return false;
+            };
+            rt.views_mut().send(id, op);
+            rt.views_mut().service(cx);
+            true
+        }) == Some(true)
+    }
+
     pub fn focus(&mut self, cx: &mut Cx) -> bool {
         let ready = self.draw_bg.area().is_valid(cx);
         cx.set_key_focus(self.draw_bg.area());

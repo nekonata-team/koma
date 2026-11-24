@@ -564,6 +564,23 @@ mod tests {
     }
 
     #[test]
+    fn unmodified_zero_zooms_only_in_overview() {
+        let zero = key(Key::Digit(0));
+        assert_eq!(
+            route_key(InputMode::KomaMode, false, zero),
+            RouteDecision::Consume
+        );
+        assert_eq!(
+            route_key(InputMode::ContentInput, false, zero),
+            RouteDecision::Forward
+        );
+        assert_eq!(
+            route_key(InputMode::Overview, false, zero),
+            RouteDecision::OverviewZoomReset
+        );
+    }
+
+    #[test]
     fn global_shortcuts_bypass_content_input_mode() {
         assert_eq!(
             route_key(

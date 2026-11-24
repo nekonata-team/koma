@@ -12,6 +12,7 @@ use koma_core::model::{
 };
 use makepad_app_terminal::term::color::Rgb;
 use makepad_app_terminal::widget::{MpTerm, TerminalColors};
+use makepad_browser_view::ViewOp;
 use makepad_widgets::event::ScrollPhase;
 use makepad_widgets::makepad_draw::DrawList2d;
 use makepad_widgets::turtle::RowAlign;
@@ -29,6 +30,53 @@ const OVERVIEW_RENDER_EPS: f64 = 0.002;
 const DRAG_THRESHOLD_PX: f64 = 8.0;
 const KOMA_CLOSE_SECONDS: f64 = 0.17;
 const KOMA_REORDER_SECONDS: f64 = 0.17;
+
+enum PinchTarget {
+    Terminal(ContentPinch),
+    Web(KomaId),
+}
+
+impl PinchTarget {
+    fn id(&self) -> &KomaId {
+        match self {
+            Self::Terminal(pinch) => &pinch.target,
+            Self::Web(id) => id,
+        }
+    }
+}
+
+struct ContentPinch {
+    target: KomaId,
+    // Work in tenths of the base scale and keep fractional input between events.
+    desired: f64,
+    shown: f64,
+}
+
+impl ContentPinch {
+    fn new(target: KomaId, scale: f64) -> Self {
+        let tenths = (scale * 10.0).round();
+        Self {
+            target,
+            desired: tenths,
+            shown: tenths,
+        }
+    }
+
+    fn update(&mut self, scale: f64) -> Option<f64> {
+        if !scale.is_finite() || scale <= 0.0 {
+            return None;
+        }
+        self.desired = (self.desired * scale).clamp(5.0, 20.0);
+        let delta = self.desired - self.shown;
+        // Require a full step in either direction before reflowing the content.
+        let steps = (delta.abs() + 1e-9).floor().copysign(delta);
+        if steps == 0.0 {
+            return None;
+        }
+        self.shown += steps;
+        Some(self.shown / 10.0)
+    }
+}
 
 script_mod! {
     use mod.prelude.widgets_internal.*
@@ -308,6 +356,8 @@ pub struct SheetStrip {
     sheet_scroll_x: HashMap<SheetId, f64>,
     #[rust]
     card_rects: Vec<(KomaId, Rect)>,
+    #[rust]
+    content_pinch: Option<PinchTarget>,
     #[rust(InputMode::ContentInput)]
     mode: InputMode,
     #[rust]
@@ -447,6 +497,10 @@ impl SheetStrip {
             trigger_slide = self.reorder_slide.is_some();
             self.close_gaps.clear();
             self.trailing_close_gap = None;
+        }
+
+        if in_overview || !same_order {
+            self.end_content_pinch(cx);
         }
 
         if prev_active != self.active_sheet && !in_overview && self.last_viewport.size.y > 1.0 {
@@ -783,6 +837,13 @@ impl SheetStrip {
             sheet.komas.retain(|s| &s.koma_id != koma_id);
         }
         self.card_rects.retain(|(id, _)| id != koma_id);
+        if self
+            .content_pinch
+            .as_ref()
+            .is_some_and(|pinch| pinch.id() == koma_id)
+        {
+            self.end_content_pinch(cx);
+        }
         self.overview_card_rects.retain(|c| &c.koma_id != koma_id);
         if self.hovered_koma.as_ref() == Some(koma_id) {
             self.hovered_koma = None;
@@ -909,6 +970,78 @@ impl SheetStrip {
             .and_then(|widget| widget.borrow_mut::<MpTerm>())
             .ok_or_else(|| format!("Terminal not ready: {koma_id}"))?;
         operation(&mut term)
+    }
+
+    fn send_web_pinch(&self, cx: &mut Cx, koma_id: &KomaId, op: ViewOp) {
+        if let Some(web) = self
+            .koma_widgets
+            .get(koma_id)
+            .and_then(|w| w.borrow::<WebKoma>())
+        {
+            web.send_view_op(cx, op);
+        }
+    }
+
+    pub fn end_content_pinch(&mut self, cx: &mut Cx) {
+        if let Some(PinchTarget::Web(id)) = self.content_pinch.take() {
+            self.send_web_pinch(cx, &id, ViewOp::EndVisualPinch);
+        }
+    }
+
+    fn handle_content_pinch(&mut self, cx: &mut Cx, event: &Event, phase: PinchPhase, scale: f64) {
+        match phase {
+            PinchPhase::Begin => {
+                self.end_content_pinch(cx);
+                if self.sheet_slide.is_some() {
+                    return;
+                }
+                let Some(sheet) = self.sheets.get(self.active_sheet) else {
+                    return;
+                };
+                self.content_pinch = sheet.komas.iter().rev().find_map(|slot| {
+                    let widget = self.koma_widgets.get(&slot.koma_id)?;
+                    let area = widget.area();
+                    let Hit::FingerPinch(hit) = event.hits(cx, area) else {
+                        return None;
+                    };
+                    let id = slot.koma_id.clone();
+                    match slot.kind {
+                        KomaKind::Terminal => {
+                            let factor = widget.borrow::<MpTerm>()?.cell_size().1;
+                            Some(PinchTarget::Terminal(ContentPinch::new(id, factor)))
+                        }
+                        KomaKind::Web => {
+                            let local = hit.abs - area.rect(cx).pos;
+                            let sent = widget.borrow::<WebKoma>()?.send_view_op(
+                                cx,
+                                ViewOp::BeginVisualPinch {
+                                    x: local.x,
+                                    y: local.y,
+                                },
+                            );
+                            sent.then_some(PinchTarget::Web(id))
+                        }
+                    }
+                });
+            }
+            PinchPhase::Update => match &mut self.content_pinch {
+                Some(PinchTarget::Terminal(pinch)) => {
+                    if let Some(factor) = pinch.update(scale) {
+                        let id = pinch.target.clone();
+                        let _ = self.with_terminal(&id, |term| {
+                            term.set_presentation_font_scale(cx, factor);
+                            Ok(())
+                        });
+                    }
+                }
+                Some(PinchTarget::Web(id)) => {
+                    let id = id.clone();
+                    self.send_web_pinch(cx, &id, ViewOp::UpdateVisualPinch { scale });
+                }
+                None => {}
+            },
+            PinchPhase::End => self.end_content_pinch(cx),
+        }
     }
 
     pub fn usable_width(&self) -> f64 {
@@ -1211,6 +1344,11 @@ impl Widget for SheetStrip {
 
         if self.is_overview_rendered() {
             self.handle_overview_event(cx, event);
+            return;
+        }
+
+        if let Event::Pinch(pinch) = event {
+            self.handle_content_pinch(cx, event, pinch.phase, pinch.scale);
             return;
         }
 
@@ -1575,6 +1713,25 @@ mod tests {
             width,
             focused: false,
         }
+    }
+
+    #[test]
+    fn content_pinch_accumulates_small_updates_and_steps_on_reversal() {
+        let mut pinch = ContentPinch::new("target".into(), 1.0);
+        assert_eq!(pinch.update(1.05), None);
+        assert_eq!(pinch.update(1.05), Some(1.1));
+        assert_eq!(pinch.update(0.98), None);
+        assert_eq!(pinch.update(0.9), Some(1.0));
+    }
+
+    #[test]
+    fn content_pinch_clamps_without_sticking_at_either_limit() {
+        let mut pinch = ContentPinch::new("target".into(), 1.0);
+        assert_eq!(pinch.update(100.0), Some(2.0));
+        assert_eq!(pinch.update(f64::NAN), None);
+        assert_eq!(pinch.update(0.95), Some(1.9));
+        assert_eq!(pinch.update(0.001), Some(0.5));
+        assert_eq!(pinch.update(1.2), Some(0.6));
     }
 
     #[test]
