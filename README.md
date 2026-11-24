@@ -53,6 +53,15 @@ Koma に変えるには `> Set as default browser` を選び、macOS の確認�
 他のアプリから開いた Web リンクは、新しい Web Koma に表示されます。
 Koma が起動していなければ Default Profile の復元先 Sheet、起動済みならリンクを受け取ったウィンドウの選択中の Sheet に追加します。
 
+### Web ページからの通知
+
+開いている Web Koma からの通知は、その Profile の通知一覧に入ります。
+別の Sheet にある Web Koma の通知も一覧に入り、Koma のウィンドウを操作中はトーストにも表示されます。
+通知一覧は Koma Mode の `m` で開き、通知を選んで `Enter` を押すと送信元の Web Koma に戻ります。
+
+サイトごとの許可操作は不要です。
+対象は、開いているページ自身が送る通知です。バックグラウンドの Service Worker や Web Push は対象外で、OS の通知センターにも表示されません。
+
 ## 設定
 
 設定を変えるには、`~/.config/koma/config.toml` を編集します。

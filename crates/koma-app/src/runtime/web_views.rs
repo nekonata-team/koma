@@ -12,6 +12,8 @@ use makepad_browser_view::{BrowserViews, RingShown, ViewId, ViewOp};
 use makepad_micro_serde::*;
 use makepad_widgets::*;
 
+use super::web_notifications::{NotificationBridge, WebNotification};
+
 const WEB_DOM_JS: &str = include_str!("../../assets/WebDOM.js");
 const WEB_READ_JS: &str = include_str!("../../assets/WebRead.js");
 const WEB_NAVIGATION_JS: &str = include_str!("../../assets/WebNavigation.js");
@@ -195,6 +197,8 @@ pub struct WebViewRuntime {
     pending_koma_api: Vec<KomaApiEvent>,
     web_nav_injected_url: HashMap<KomaId, String>,
     pending_web_nav: Vec<WebNavEvent>,
+    notification_bridges: HashMap<ViewId, NotificationBridge>,
+    pending_web_notifications: Vec<WebNotification>,
     last_observed_url: HashMap<KomaId, String>,
     pending_url_changes: Vec<(KomaId, String)>,
     last_size: Option<(Vec2d, f64)>,
@@ -218,6 +222,8 @@ impl WebViewRuntime {
             pending_koma_api: Vec::new(),
             web_nav_injected_url: HashMap::new(),
             pending_web_nav: Vec::new(),
+            notification_bridges: HashMap::new(),
+            pending_web_notifications: Vec::new(),
             last_observed_url: HashMap::new(),
             pending_url_changes: Vec::new(),
             last_size: None,
@@ -284,7 +290,18 @@ impl WebViewRuntime {
         if let Some(id) = self.koma_to_view.get(koma_id).copied() {
             return Some(id);
         }
-        let id = self.views.open(url, true, 0xff10_1521)?;
+        let bridge = NotificationBridge::new()
+            .map_err(|err| {
+                eprintln!("Could not initialize Web notifications: {err}");
+            })
+            .ok();
+        let script = bridge.as_ref().map(NotificationBridge::script);
+        let id = self
+            .views
+            .open_with_document_script(url, true, 0xff10_1521, script)?;
+        if let Some(bridge) = bridge {
+            self.notification_bridges.insert(id, bridge);
+        }
         self.koma_to_view.insert(koma_id.clone(), id);
         self.view_to_koma.insert(id, koma_id.clone());
         self.koma_sizes.insert(koma_id.clone(), (size, dpi));
@@ -312,6 +329,7 @@ impl WebViewRuntime {
             return;
         };
         self.view_to_koma.remove(&id);
+        self.notification_bridges.remove(&id);
         self.koma_sizes.remove(koma_id);
         self.koma_hidden.remove(koma_id);
         self.koma_api_enabled.remove(koma_id);
@@ -472,6 +490,10 @@ impl WebViewRuntime {
 
     pub fn take_web_nav_events(&mut self) -> Vec<WebNavEvent> {
         std::mem::take(&mut self.pending_web_nav)
+    }
+
+    pub fn take_web_notifications(&mut self) -> Vec<WebNotification> {
+        std::mem::take(&mut self.pending_web_notifications)
     }
 
     pub fn take_url_changes(&mut self) -> Vec<(KomaId, String)> {
@@ -676,7 +698,21 @@ impl WebViewRuntime {
                     }
                 }
             }
-            for line in self.views.take_console(id) {
+            let console = self.views.take_console(id);
+            let notification_source = self
+                .notification_bridges
+                .get(&id)
+                .zip(koma_id_opt.as_ref())
+                .zip(self.views.state(id));
+            for line in console {
+                if let Some(notification) =
+                    notification_source.and_then(|((bridge, koma), state)| {
+                        bridge.receive(koma, &state.url, &line.message)
+                    })
+                {
+                    self.pending_web_notifications.push(notification);
+                    continue;
+                }
                 if let Some(payload) = line.message.strip_prefix("__KOMA_WEB_NAV__:") {
                     if let Some(koma_id) = &koma_id_opt {
                         if let Ok(msg) = WebNavMessage::deserialize_json(payload) {

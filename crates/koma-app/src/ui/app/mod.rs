@@ -285,6 +285,10 @@ pub struct App {
     palette_selected: usize,
     #[rust]
     toast_timer: Timer,
+    #[rust]
+    window_focused: bool,
+    #[rust]
+    last_web_toast: Option<std::time::Instant>,
 }
 
 impl App {
@@ -1269,7 +1273,17 @@ impl AppMain for App {
         }
 
         match event {
-            Event::WindowLostFocus(_) => self.handled_keys.clear(),
+            Event::WindowGotFocus(id) => {
+                if self.ui.window(cx, ids!(main_window)).window_id() == Some(*id) {
+                    self.window_focused = true;
+                }
+            }
+            Event::WindowLostFocus(id) => {
+                self.handled_keys.clear();
+                if self.ui.window(cx, ids!(main_window)).window_id() == Some(*id) {
+                    self.window_focused = false;
+                }
+            }
             Event::KeyUp(key) => {
                 self.suppress_text_input = false;
                 if let Some(index) = self
@@ -1404,6 +1418,30 @@ impl AppMain for App {
             self.save_state(cx);
             self.sync_strip(cx, false);
             self.update_status(cx);
+        }
+        let notifications = self.web_runtime().borrow_mut().take_web_notifications();
+        let mut newest = None;
+        for notification in notifications {
+            if self.state.koma_by_id(&notification.koma_id).is_some() {
+                newest = Some(self.state.push_notification(
+                    notification.koma_id,
+                    notification.title,
+                    notification.body,
+                ));
+            }
+        }
+        if let Some(newest) = newest {
+            self.render_notifications_overlay(cx);
+            self.update_status(cx);
+            self.ui.redraw(cx);
+            if self.window_focused
+                && self
+                    .last_web_toast
+                    .is_none_or(|previous| previous.elapsed() >= std::time::Duration::from_secs(4))
+            {
+                self.last_web_toast = Some(std::time::Instant::now());
+                self.show_toast(cx, format!("{}: {}", newest.title, newest.body));
+            }
         }
         let koma_api_events = self.web_runtime().borrow_mut().take_koma_api_events();
         for ev in koma_api_events {

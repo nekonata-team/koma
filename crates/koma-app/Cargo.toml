@@ -11,6 +11,7 @@ makepad-browser-view = { git = "https://github.com/makepad/makepad", branch = "m
 makepad-app-terminal = { git = "https://github.com/makepad/makepad", branch = "main", default-features = false }
 makepad-micro-serde = { git = "https://github.com/makepad/makepad", branch = "main" }
 toml = "1.2.1"
+getrandom = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 makepad-apple-sys = { git = "https://github.com/makepad/makepad", branch = "main" }
