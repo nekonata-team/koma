@@ -12,6 +12,8 @@ Koma は、ターミナルと Web ページを同じキャンバスに並べて�
 | Web Koma の URL を編集 | `Cmd+L` |
 | 隣の Koma に移動 | `Cmd+Opt+←` / `Cmd+Opt+→` |
 | 前後の Sheet に移動 | `Cmd+Opt+↑` / `Cmd+Opt+↓` |
+| Koma を左右に並べ替え | `Cmd+Opt+Shift+←` / `Cmd+Opt+Shift+→` |
+| Koma を前後の Sheet へ移動 | `Cmd+Opt+Shift+↑` / `Cmd+Opt+Shift+↓` |
 | Overview で全体を見渡す | `Cmd+Shift+O` |
 | 表示を拡大・縮小 | `Cmd+=` / `Cmd+-` |
 | 表示倍率をリセット | `Cmd+0` |
@@ -85,6 +87,10 @@ session_list_command = "zmx list --short" # 使用中の外部セッション名
 "alt+right" = "focus_next_koma"
 "alt+up" = "prev_sheet"
 "alt+down" = "next_sheet"
+"alt+shift+left" = "move_prev_koma"
+"alt+shift+right" = "move_next_koma"
+"alt+shift+up" = "move_prev_sheet"
+"alt+shift+down" = "move_next_sheet"
 
 [keybindings.koma]
 "y" = "duplicate_koma"

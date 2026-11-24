@@ -503,10 +503,26 @@ fn route_global_with_primary(stroke: KeyStroke, primary_is_logo: bool) -> Option
     };
     if primary && stroke.alt && other_clear {
         return match stroke.key {
-            Key::Left => Some(RouteDecision::FocusRelativeKoma(-1)),
-            Key::Right => Some(RouteDecision::FocusRelativeKoma(1)),
-            Key::Up => Some(RouteDecision::SwitchSheetRelative(-1, false)),
-            Key::Down => Some(RouteDecision::SwitchSheetRelative(1, false)),
+            Key::Left => Some(if stroke.shift {
+                RouteDecision::MoveFocusedKoma(-1)
+            } else {
+                RouteDecision::FocusRelativeKoma(-1)
+            }),
+            Key::Right => Some(if stroke.shift {
+                RouteDecision::MoveFocusedKoma(1)
+            } else {
+                RouteDecision::FocusRelativeKoma(1)
+            }),
+            Key::Up => Some(if stroke.shift {
+                RouteDecision::MoveFocusedKomaToSheet(-1)
+            } else {
+                RouteDecision::SwitchSheetRelative(-1, false)
+            }),
+            Key::Down => Some(if stroke.shift {
+                RouteDecision::MoveFocusedKomaToSheet(1)
+            } else {
+                RouteDecision::SwitchSheetRelative(1, false)
+            }),
             Key::Digit(n @ 1..=9) => Some(RouteDecision::SwitchSheet((n - 1) as usize)),
             Key::I => Some(RouteDecision::OpenDevTools),
             _ => None,
@@ -673,6 +689,27 @@ mod tests {
             ),
             RouteDecision::SwitchSheet(1)
         );
+        for (key, expected) in [
+            (Key::Left, RouteDecision::MoveFocusedKoma(-1)),
+            (Key::Right, RouteDecision::MoveFocusedKoma(1)),
+            (Key::Up, RouteDecision::MoveFocusedKomaToSheet(-1)),
+            (Key::Down, RouteDecision::MoveFocusedKomaToSheet(1)),
+        ] {
+            assert_eq!(
+                route_key(
+                    InputMode::ContentInput,
+                    false,
+                    KeyStroke {
+                        logo: true,
+                        alt: true,
+                        shift: true,
+                        key,
+                        ..Default::default()
+                    }
+                ),
+                expected
+            );
+        }
         assert_eq!(
             route_key(
                 InputMode::ContentInput,
