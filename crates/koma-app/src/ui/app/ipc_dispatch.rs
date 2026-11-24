@@ -1,5 +1,7 @@
 //! IPC request dispatch for `App` (runs on the UI thread via `SignalToUI`).
 
+use std::sync::mpsc::SyncSender;
+
 use koma_app::domain::sheet_presets::available_sheet_presets;
 use koma_core::input::{
     expand_tilde, parse_open_koma_input_with_engine, resolve_web_url_with_engine, KomaInput,
@@ -17,14 +19,19 @@ use makepad_widgets::*;
 
 use super::{derive_cwd_label, App};
 use crate::runtime::ipc_server::PendingIpc;
-use crate::runtime::web_views::is_local_html_url;
-use crate::ui::sheet_strip::SheetStrip;
+use crate::runtime::profiles::{self, Profile};
+use crate::runtime::web_views::{is_local_html_url, WebViewRuntime};
 
-fn summarize_koma(
-    rt: &crate::runtime::web_views::WebViewRuntime,
-    sheet: &SheetState,
-    koma: &KomaMeta,
-) -> KomaSummary {
+type IpcReply = SyncSender<IpcResponse>;
+
+fn send_result(reply: IpcReply, result: Result<IpcPayload, String>) {
+    let _ = reply.send(match result {
+        Ok(payload) => IpcResponse::Ok(payload),
+        Err(err) => IpcResponse::err(err),
+    });
+}
+
+fn summarize_koma(rt: &WebViewRuntime, sheet: &SheetState, koma: &KomaMeta) -> KomaSummary {
     let url = (koma.kind == KomaKind::Web)
         .then(|| {
             rt.koma_url_title(&koma.id)
@@ -69,11 +76,82 @@ impl App {
         let PendingIpc { req, reply } = pending;
         let caller = req.caller_koma_id.map(KomaId::from);
         let caller = caller.as_ref();
-        let create_profile = matches!(req.command, IpcCommand::ProfileNew { .. });
         match req.command {
-            IpcCommand::Health => {
-                let _ = reply.send(IpcResponse::ok());
+            cmd @ (IpcCommand::KomaList(_)
+            | IpcCommand::KomaFocused
+            | IpcCommand::KomaExists { .. }
+            | IpcCommand::KomaFocus { .. }
+            | IpcCommand::KomaMove { .. }
+            | IpcCommand::KomaResize { .. }
+            | IpcCommand::KomaClose { .. }) => {
+                send_result(reply, self.dispatch_koma(cx, cmd, caller));
             }
+            cmd @ (IpcCommand::SheetClose
+            | IpcCommand::SheetList
+            | IpcCommand::SheetNew { .. }
+            | IpcCommand::SheetFocus { .. }
+            | IpcCommand::PresetList
+            | IpcCommand::PresetSave { .. }
+            | IpcCommand::PresetApply { .. }
+            | IpcCommand::Overview
+            | IpcCommand::OverviewToggle) => {
+                send_result(reply, self.dispatch_sheet(cx, cmd));
+            }
+            cmd @ (IpcCommand::WebDevtools
+            | IpcCommand::WebNew { .. }
+            | IpcCommand::WebReload(_)
+            | IpcCommand::WebRead(_)
+            | IpcCommand::WebText(_)
+            | IpcCommand::WebClick(_)
+            | IpcCommand::WebFill(_)
+            | IpcCommand::WebUrl(_)
+            | IpcCommand::WebEval(_)
+            | IpcCommand::WebScriptTarget(_)
+            | IpcCommand::WebSnapshot(_)
+            | IpcCommand::WebType(_)
+            | IpcCommand::BenchSpawnWebs { .. }) => {
+                self.dispatch_web(cx, cmd, caller, reply);
+            }
+            cmd @ (IpcCommand::TerminalNew(_)
+            | IpcCommand::TerminalRun(_)
+            | IpcCommand::TerminalPress(_)
+            | IpcCommand::TerminalKill(_)
+            | IpcCommand::TerminalText(_)
+            | IpcCommand::TerminalSend(_)) => {
+                send_result(reply, self.dispatch_terminal(cx, cmd, caller));
+            }
+            cmd @ (IpcCommand::DrawerList
+            | IpcCommand::DrawerKeep(_)
+            | IpcCommand::DrawerPlace(_)
+            | IpcCommand::DrawerDiscard(_)
+            | IpcCommand::DrawerRestore) => {
+                send_result(reply, self.dispatch_drawer(cx, cmd));
+            }
+            cmd @ (IpcCommand::NotificationSend(_)
+            | IpcCommand::NotificationList { .. }
+            | IpcCommand::NotificationRead { .. }
+            | IpcCommand::NotificationUnread { .. }) => {
+                send_result(reply, self.dispatch_notification(cx, cmd, caller));
+            }
+            cmd @ (IpcCommand::Health
+            | IpcCommand::ProfileList
+            | IpcCommand::ProfileOpen { .. }
+            | IpcCommand::ProfileNew { .. }
+            | IpcCommand::ProfileActivate { .. }
+            | IpcCommand::WorkspacePrivate
+            | IpcCommand::SettingsReload) => {
+                self.dispatch_workspace(cx, cmd, reply);
+            }
+        }
+    }
+
+    fn dispatch_koma(
+        &mut self,
+        cx: &mut Cx,
+        cmd: IpcCommand,
+        caller: Option<&KomaId>,
+    ) -> Result<IpcPayload, String> {
+        match cmd {
             IpcCommand::KomaList(args) => {
                 let sheet = match args.sheet_id.as_deref().map(SheetId::from) {
                     Some(id) => self.state.sheets().iter().find(|sheet| sheet.id == id),
@@ -88,134 +166,84 @@ impl App {
                             })
                             .unwrap_or_else(|| self.state.current_sheet()),
                     ),
-                };
-                let resp = match sheet {
-                    Some(sheet) => {
-                        let rt = self.web_runtime().borrow();
-                        let komas = sheet
-                            .komas
-                            .iter()
-                            .map(|koma| summarize_koma(&rt, sheet, koma))
-                            .collect();
-                        IpcResponse::Ok(IpcPayload::KomaList {
-                            sheet_id: sheet.id.to_string(),
-                            komas,
-                        })
-                    }
-                    None => IpcResponse::err(format!(
-                        "Sheet not found: {}",
-                        args.sheet_id.unwrap_or_default()
-                    )),
-                };
-                let _ = reply.send(resp);
+                }
+                .ok_or_else(|| format!("Sheet not found: {}", args.sheet_id.unwrap_or_default()))?;
+                let rt = self.web_runtime().borrow();
+                let komas = sheet
+                    .komas
+                    .iter()
+                    .map(|koma| summarize_koma(&rt, sheet, koma))
+                    .collect();
+                Ok(IpcPayload::KomaList {
+                    sheet_id: sheet.id.to_string(),
+                    komas,
+                })
             }
             IpcCommand::KomaFocused => {
                 let sheet = self.state.current_sheet();
                 let koma = sheet
                     .focused_koma()
                     .map(|koma| summarize_koma(&self.web_runtime().borrow(), sheet, koma));
-                let _ = reply.send(IpcResponse::Ok(IpcPayload::KomaFocused(KomaFocusedData {
+                Ok(IpcPayload::KomaFocused(KomaFocusedData {
                     sheet_id: sheet.id.to_string(),
                     koma,
-                })));
+                }))
             }
             IpcCommand::KomaExists { koma_id } => {
                 let koma_id = KomaId::from(koma_id);
                 let exists = self.state.koma_by_id(&koma_id).is_some();
-                let _ = reply.send(IpcResponse::Ok(IpcPayload::KomaExists {
+                Ok(IpcPayload::KomaExists {
                     koma_id: koma_id.into_string(),
                     exists,
-                }));
+                })
             }
             IpcCommand::KomaFocus { koma_id } => {
                 let koma_id = KomaId::from(koma_id);
-                let resp = if self.state.koma_by_id(&koma_id).is_some() {
-                    self.state.drawer_open = false;
-                    self.state.notifications_open = false;
-                    self.width_mode_open = false;
-                    self.state.focus_koma_by_id(&koma_id);
-                    self.close_prompt(cx);
-                    self.set_mode(cx, koma_core::model::InputMode::ContentInput, true);
-                    IpcResponse::Ok(IpcPayload::KomaId {
-                        koma_id: koma_id.into_string(),
-                    })
-                } else {
-                    IpcResponse::err(format!("Koma not found: {koma_id}"))
-                };
-                let _ = reply.send(resp);
+                if self.state.koma_by_id(&koma_id).is_none() {
+                    return Err(format!("Koma not found: {koma_id}"));
+                }
+                self.state.drawer_open = false;
+                self.state.notifications_open = false;
+                self.width_mode_open = false;
+                self.state.focus_koma_by_id(&koma_id);
+                self.close_prompt(cx);
+                self.set_mode(cx, koma_core::model::InputMode::ContentInput, true);
+                Ok(IpcPayload::KomaId {
+                    koma_id: koma_id.into_string(),
+                })
             }
             IpcCommand::KomaMove { koma_id, placement } => {
                 let koma_id = KomaId::from(koma_id);
-                let resp = match self.move_koma_from_ipc(cx, &koma_id, &placement) {
-                    Ok(()) => IpcResponse::Ok(IpcPayload::KomaId {
-                        koma_id: koma_id.into_string(),
-                    }),
-                    Err(err) => IpcResponse::err(err),
-                };
-                let _ = reply.send(resp);
+                self.move_koma_from_ipc(cx, &koma_id, &placement)?;
+                Ok(IpcPayload::KomaId {
+                    koma_id: koma_id.into_string(),
+                })
             }
             IpcCommand::KomaResize { koma_id, width } => {
                 let koma_id = KomaId::from(koma_id);
-                let resp = match self.state.set_koma_width(&koma_id, width) {
-                    Ok(width) => {
-                        self.sync_after_mutation(cx, false);
-                        IpcResponse::Ok(IpcPayload::KomaResized {
-                            koma_id: koma_id.into_string(),
-                            width,
-                        })
-                    }
-                    Err(err) => IpcResponse::err(err),
-                };
-                let _ = reply.send(resp);
+                let width = self.state.set_koma_width(&koma_id, width)?;
+                self.sync_after_mutation(cx, false);
+                Ok(IpcPayload::KomaResized {
+                    koma_id: koma_id.into_string(),
+                    width,
+                })
             }
             IpcCommand::KomaClose { koma_id } => {
                 let koma_id = KomaId::from(koma_id);
-                let resp = match self.close_koma_by_id(cx, &koma_id, false) {
-                    Ok(()) => IpcResponse::Ok(IpcPayload::KomaId {
-                        koma_id: koma_id.into_string(),
-                    }),
-                    Err(err) => IpcResponse::err(err),
-                };
-                let _ = reply.send(resp);
+                self.close_koma_by_id(cx, &koma_id, false)?;
+                Ok(IpcPayload::KomaId {
+                    koma_id: koma_id.into_string(),
+                })
             }
-            IpcCommand::ProfileList => {
-                use crate::runtime::profiles::{self, Profile};
-                let resp = match profiles::root().and_then(|root| Profile::list(&root)) {
-                    Ok(profiles) => IpcResponse::Ok(IpcPayload::ProfileList { profiles }),
-                    Err(err) => IpcResponse::err(err),
-                };
-                let _ = reply.send(resp);
-            }
-            IpcCommand::ProfileOpen { id } | IpcCommand::ProfileNew { id } => {
-                self.open_profile(cx, id, create_profile, move |result| {
-                    let _ = reply.send(match result {
-                        Ok(()) => IpcResponse::ok(),
-                        Err(err) => IpcResponse::err(err),
-                    });
-                });
-            }
-            IpcCommand::ProfileActivate { id } => {
-                let resp = if !self.is_private && id == self.state.profile_id {
-                    self.ui.window(cx, ids!(main_window)).show(cx);
-                    IpcResponse::ok()
-                } else {
-                    IpcResponse::err("IPC endpoint belongs to a different Profile")
-                };
-                let _ = reply.send(resp);
-            }
-            IpcCommand::WorkspacePrivate => {
-                let resp = match self.spawn_private_workspace(cx) {
-                    Ok(()) => IpcResponse::ok(),
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
-            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn dispatch_sheet(&mut self, cx: &mut Cx, cmd: IpcCommand) -> Result<IpcPayload, String> {
+        match cmd {
             IpcCommand::SheetClose => {
-                let resp = match self.close_current_sheet(cx) {
-                    Ok(()) => IpcResponse::ok(),
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
+                self.close_current_sheet(cx)?;
+                Ok(IpcPayload::Ack)
             }
             IpcCommand::SheetList => {
                 let sheets = self
@@ -230,18 +258,26 @@ impl App {
                         koma_count: sheet.komas.len(),
                     })
                     .collect();
-                let _ = reply.send(IpcResponse::Ok(IpcPayload::SheetList { sheets }));
+                Ok(IpcPayload::SheetList { sheets })
             }
             IpcCommand::SheetNew { label, focus } => {
-                let resp = match self.state.add_named_sheet(&label, focus) {
-                    Ok(sheet) => {
-                        let sheet_id = sheet.id.to_string();
-                        self.sync_after_mutation(cx, focus);
-                        IpcResponse::Ok(IpcPayload::SheetId { sheet_id })
-                    }
-                    Err(err) => IpcResponse::err(err),
-                };
-                let _ = reply.send(resp);
+                let sheet = self.state.add_named_sheet(&label, focus)?;
+                let sheet_id = sheet.id.to_string();
+                self.sync_after_mutation(cx, focus);
+                Ok(IpcPayload::SheetId { sheet_id })
+            }
+            IpcCommand::SheetFocus { sheet_index } => {
+                let idx = sheet_index
+                    .checked_sub(1)
+                    .filter(|&i| i < self.state.sheets().len())
+                    .ok_or_else(|| {
+                        format!(
+                            "Sheet index out of range (expected 1..={})",
+                            self.state.sheets().len()
+                        )
+                    })?;
+                self.switch_sheet(cx, idx);
+                Ok(IpcPayload::Ack)
             }
             IpcCommand::PresetList => {
                 let presets = available_sheet_presets(
@@ -254,210 +290,311 @@ impl App {
                     personal: p.personal,
                 })
                 .collect();
-                let _ = reply.send(IpcResponse::Ok(IpcPayload::PresetList { presets }));
+                Ok(IpcPayload::PresetList { presets })
             }
             IpcCommand::PresetSave { name } => {
-                let resp = match self.state.save_current_sheet_as_preset(&name) {
-                    Ok(preset) => {
-                        self.save_state(cx);
-                        self.show_toast(cx, format!("Saved preset: {}", preset.name));
-                        IpcResponse::Ok(IpcPayload::PresetSaved { name: preset.name })
-                    }
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
+                let preset = self.state.save_current_sheet_as_preset(&name)?;
+                self.save_state(cx);
+                self.show_toast(cx, format!("Saved preset: {}", preset.name));
+                Ok(IpcPayload::PresetSaved { name: preset.name })
             }
             IpcCommand::PresetApply { name } => {
-                let resp = match self.apply_sheet_preset_by_name(cx, &name) {
-                    Ok(idx) => IpcResponse::Ok(IpcPayload::PresetApplied {
-                        sheet_index: idx + 1,
-                    }),
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
-            }
-            IpcCommand::WebDevtools => {
-                let resp = match self.open_devtools_for_focused_web(cx) {
-                    Ok(koma) => IpcResponse::Ok(IpcPayload::WebKoma(WebKomaData {
-                        koma_id: koma.id.into_string(),
-                        url: koma.initial_url,
-                    })),
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
+                let idx = self.apply_sheet_preset_by_name(cx, &name)?;
+                Ok(IpcPayload::PresetApplied {
+                    sheet_index: idx + 1,
+                })
             }
             IpcCommand::Overview => {
-                let sheets = {
-                    let rt = self.web_runtime().borrow();
-                    self.state
-                        .sheets()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, sheet)| SheetSummary {
-                            id: sheet.id.to_string(),
-                            label: sheet.label.clone(),
-                            is_active: i == self.state.active_sheet_index(),
-                            komas: sheet
-                                .komas
-                                .iter()
-                                .map(|koma| summarize_koma(&rt, sheet, koma))
-                                .collect(),
-                        })
-                        .collect()
-                };
-                let _ = reply.send(IpcResponse::Ok(IpcPayload::Overview { sheets }));
+                let rt = self.web_runtime().borrow();
+                let sheets = self
+                    .state
+                    .sheets()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, sheet)| SheetSummary {
+                        id: sheet.id.to_string(),
+                        label: sheet.label.clone(),
+                        is_active: i == self.state.active_sheet_index(),
+                        komas: sheet
+                            .komas
+                            .iter()
+                            .map(|koma| summarize_koma(&rt, sheet, koma))
+                            .collect(),
+                    })
+                    .collect();
+                Ok(IpcPayload::Overview { sheets })
             }
             IpcCommand::OverviewToggle => {
                 self.toggle_overview(cx);
-                let _ = reply.send(IpcResponse::ok());
+                Ok(IpcPayload::Ack)
             }
-            IpcCommand::SettingsReload => {
-                let resp = match self.reload_configs(cx) {
-                    Ok(()) => {
-                        self.show_toast(cx, "Reloaded config");
-                        IpcResponse::ok()
-                    }
-                    Err(err) => IpcResponse::err(err),
-                };
-                let _ = reply.send(resp);
-            }
-            IpcCommand::SheetFocus { sheet_index } => {
-                let idx = sheet_index.checked_sub(1);
-                let resp = match idx {
-                    Some(i) if i < self.state.sheets().len() => {
-                        self.switch_sheet(cx, i);
-                        IpcResponse::ok()
-                    }
-                    _ => IpcResponse::err(format!(
-                        "Sheet index out of range (expected 1..={})",
-                        self.state.sheets().len()
-                    )),
-                };
-                let _ = reply.send(resp);
+            _ => unreachable!(),
+        }
+    }
+
+    fn dispatch_web(
+        &mut self,
+        cx: &mut Cx,
+        cmd: IpcCommand,
+        caller: Option<&KomaId>,
+        reply: IpcReply,
+    ) {
+        match cmd {
+            IpcCommand::WebDevtools => {
+                send_result(
+                    reply,
+                    self.open_devtools_for_focused_web(cx).map(|koma| {
+                        IpcPayload::WebKoma(WebKomaData {
+                            koma_id: koma.id.into_string(),
+                            url: koma.initial_url,
+                        })
+                    }),
+                );
             }
             IpcCommand::WebNew {
                 url: raw_url,
                 koma_api,
             } => {
-                let home_dir = std::env::var("HOME").ok();
-                let resp = match resolve_web_url_with_engine(
-                    &raw_url,
-                    home_dir.as_deref(),
-                    self.config.search_engine,
-                ) {
-                    Ok((url, label)) => {
-                        if koma_api && !is_local_html_url(&url) {
-                            IpcResponse::err("--koma-api requires a local .html or .htm file")
-                        } else {
-                            let koma =
-                                self.create_web_koma_after(cx, url.clone(), Some(label), caller);
-                            if koma_api {
-                                self.state.set_koma_api_enabled(&koma.id, true);
-                                self.web_runtime()
-                                    .borrow_mut()
-                                    .set_koma_api_enabled(cx, &koma.id, true);
-                                self.save_state(cx);
-                            }
-                            IpcResponse::Ok(IpcPayload::WebKoma(WebKomaData {
-                                koma_id: koma.id.into_string(),
-                                url: Some(url),
-                            }))
-                        }
+                let result = (|| {
+                    let home_dir = std::env::var("HOME").ok();
+                    let (url, label) = resolve_web_url_with_engine(
+                        &raw_url,
+                        home_dir.as_deref(),
+                        self.config.search_engine,
+                    )?;
+                    if koma_api && !is_local_html_url(&url) {
+                        return Err("--koma-api requires a local .html or .htm file".into());
                     }
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
+                    let koma = self.create_web_koma_after(cx, url.clone(), Some(label), caller);
+                    if koma_api {
+                        self.state.set_koma_api_enabled(&koma.id, true);
+                        self.web_runtime()
+                            .borrow_mut()
+                            .set_koma_api_enabled(cx, &koma.id, true);
+                        self.save_state(cx);
+                    }
+                    Ok(IpcPayload::WebKoma(WebKomaData {
+                        koma_id: koma.id.into_string(),
+                        url: Some(url),
+                    }))
+                })();
+                send_result(reply, result);
             }
             IpcCommand::WebReload(WebReloadArgs { koma_id, koma_api }) => {
-                let resp = match self.resolve_web_koma(koma_id, caller) {
-                    Ok(koma_id) => {
-                        if let Some(enable) = koma_api {
-                            let current_url = self
-                                .web_runtime()
-                                .borrow()
-                                .koma_url_title(&koma_id)
-                                .map(|(u, _)| u)
-                                .filter(|u| !u.is_empty())
-                                .or_else(|| {
-                                    self.state
-                                        .koma_by_id(&koma_id)
-                                        .and_then(|b| b.initial_url.clone())
-                                })
-                                .unwrap_or_default();
-                            if enable && !is_local_html_url(&current_url) {
-                                let _ = reply.send(IpcResponse::err(
-                                    "--koma-api requires a local .html or .htm page",
-                                ));
-                                return;
-                            }
-                            self.state.set_koma_api_enabled(&koma_id, enable);
-                            self.web_runtime()
-                                .borrow_mut()
-                                .set_koma_api_enabled(cx, &koma_id, enable);
-                            self.save_state(cx);
+                let result = (|| {
+                    let koma_id = self.resolve_web_koma(koma_id, caller)?;
+                    if let Some(enable) = koma_api {
+                        let current_url = self
+                            .web_runtime()
+                            .borrow()
+                            .koma_url_title(&koma_id)
+                            .map(|(u, _)| u)
+                            .filter(|u| !u.is_empty())
+                            .or_else(|| {
+                                self.state
+                                    .koma_by_id(&koma_id)
+                                    .and_then(|b| b.initial_url.clone())
+                            })
+                            .unwrap_or_default();
+                        if enable && !is_local_html_url(&current_url) {
+                            return Err("--koma-api requires a local .html or .htm page".into());
                         }
-                        self.web_runtime().borrow_mut().reload(cx, &koma_id);
-                        IpcResponse::Ok(IpcPayload::KomaId {
-                            koma_id: koma_id.into_string(),
-                        })
+                        self.state.set_koma_api_enabled(&koma_id, enable);
+                        self.web_runtime()
+                            .borrow_mut()
+                            .set_koma_api_enabled(cx, &koma_id, enable);
+                        self.save_state(cx);
                     }
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
+                    self.web_runtime().borrow_mut().reload(cx, &koma_id);
+                    Ok(IpcPayload::KomaId {
+                        koma_id: koma_id.into_string(),
+                    })
+                })();
+                send_result(reply, result);
             }
             IpcCommand::WebRead(WebReadArgs { koma_id, within }) => {
-                match self.resolve_web_koma(koma_id, caller) {
-                    Ok(koma_id) => {
-                        self.web_runtime().borrow_mut().read_for_ipc(
-                            cx,
-                            &koma_id,
-                            within.as_deref(),
-                            reply,
-                        );
-                    }
-                    Err(e) => {
-                        let _ = reply.send(IpcResponse::err(e));
-                    }
-                }
+                self.with_resolved_web_koma(koma_id, caller, reply, |rt, id, reply| {
+                    rt.read_for_ipc(cx, &id, within.as_deref(), reply);
+                });
             }
             IpcCommand::WebText(KomaTarget { koma_id }) => {
-                match self.resolve_web_koma(koma_id, caller) {
-                    Ok(koma_id) => {
-                        self.web_runtime()
-                            .borrow_mut()
-                            .text_for_ipc(cx, &koma_id, reply);
-                    }
-                    Err(e) => {
-                        let _ = reply.send(IpcResponse::err(e));
-                    }
-                }
+                self.with_resolved_web_koma(koma_id, caller, reply, |rt, id, reply| {
+                    rt.text_for_ipc(cx, &id, reply);
+                });
             }
             IpcCommand::WebClick(WebClickArgs { koma_id, selector }) => {
-                match self.resolve_web_koma(koma_id, caller) {
-                    Ok(koma_id) => {
-                        self.web_runtime()
-                            .borrow_mut()
-                            .click_for_ipc(cx, &koma_id, &selector, reply);
-                    }
-                    Err(e) => {
-                        let _ = reply.send(IpcResponse::err(e));
-                    }
-                }
+                self.with_resolved_web_koma(koma_id, caller, reply, |rt, id, reply| {
+                    rt.click_for_ipc(cx, &id, &selector, reply);
+                });
             }
             IpcCommand::WebFill(WebFillArgs {
                 koma_id,
                 selector,
                 text,
-            }) => match self.resolve_web_koma(koma_id, caller) {
-                Ok(koma_id) => {
+            }) => {
+                self.with_resolved_web_koma(koma_id, caller, reply, |rt, id, reply| {
+                    rt.fill_for_ipc(cx, &id, &selector, &text, reply);
+                });
+            }
+            IpcCommand::WebUrl(KomaTarget { koma_id }) => {
+                let result = self.resolve_web_koma(koma_id, caller).map(|koma_id| {
+                    let (url, title) = self
+                        .web_runtime()
+                        .borrow()
+                        .koma_url_title(&koma_id)
+                        .unwrap_or_else(|| {
+                            let fallback = self
+                                .state
+                                .koma_by_id(&koma_id)
+                                .and_then(|b| b.initial_url.clone())
+                                .unwrap_or_default();
+                            (fallback, String::new())
+                        });
+                    IpcPayload::WebUrl {
+                        koma_id: koma_id.into_string(),
+                        url,
+                        title,
+                    }
+                });
+                send_result(reply, result);
+            }
+            IpcCommand::WebEval(WebEvalArgs { koma_id, script }) => {
+                self.with_resolved_web_koma(koma_id, caller, reply, |rt, id, reply| {
+                    rt.eval_for_ipc(cx, &id, &script, reply);
+                });
+            }
+            IpcCommand::WebScriptTarget(KomaTarget { koma_id }) => {
+                self.with_resolved_web_koma(koma_id, caller, reply, |rt, id, reply| {
+                    rt.script_target_for_ipc(cx, id, reply);
+                });
+            }
+            IpcCommand::WebSnapshot(KomaTarget { koma_id }) => {
+                self.with_resolved_web_koma(koma_id, caller, reply, |rt, id, reply| {
+                    rt.snapshot_for_ipc(cx, &id, reply);
+                });
+            }
+            IpcCommand::WebType(KomaTextArgs { koma_id, text }) => {
+                let result = self.resolve_web_koma(koma_id, caller).and_then(|koma_id| {
                     self.web_runtime()
                         .borrow_mut()
-                        .fill_for_ipc(cx, &koma_id, &selector, &text, reply);
+                        .commit_text(cx, &koma_id, &text)?;
+                    Ok(IpcPayload::KomaId {
+                        koma_id: koma_id.into_string(),
+                    })
+                });
+                send_result(reply, result);
+            }
+            IpcCommand::BenchSpawnWebs { count } => {
+                let mut rt = self.web_runtime().borrow_mut();
+                let mut total = rt.view_count();
+                let result = (|| {
+                    for i in 1..=count {
+                        let bid = KomaId::from(format!("bench-web-{i}"));
+                        let url = if i % 2 == 1 {
+                            "https://example.com"
+                        } else {
+                            "https://makepad.nl"
+                        };
+                        total = rt.open_extra_koma(cx, &bid, url)?;
+                    }
+                    Ok(IpcPayload::BenchSpawnWebs { total_views: total })
+                })();
+                send_result(reply, result);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn dispatch_terminal(
+        &mut self,
+        cx: &mut Cx,
+        cmd: IpcCommand,
+        caller: Option<&KomaId>,
+    ) -> Result<IpcPayload, String> {
+        match cmd {
+            IpcCommand::TerminalNew(TerminalNewArgs { cwd, run }) => {
+                if run
+                    .as_deref()
+                    .is_some_and(|command| command.trim().is_empty())
+                {
+                    return Err("Terminal command must not be empty".into());
                 }
-                Err(e) => {
-                    let _ = reply.send(IpcResponse::err(e));
+                let home_dir = std::env::var("HOME").ok();
+                let cwd = cwd
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|p| expand_tilde(p, home_dir.as_deref()));
+                let koma = self.create_terminal_koma_after(cx, cwd, caller);
+                if let Some(command) = run {
+                    self.with_terminal_from_ipc(cx, &koma.id, |cx, term| {
+                        term.run_command(cx, &command)
+                    })
+                    .map_err(|err| {
+                        format!("Koma {} created, initial command failed: {err}", koma.id)
+                    })?;
                 }
-            },
+                Ok(IpcPayload::KomaId {
+                    koma_id: koma.id.into_string(),
+                })
+            }
+            IpcCommand::TerminalRun(args) => {
+                self.terminal_input(cx, args, caller, MpTerm::run_command)
+            }
+            IpcCommand::TerminalPress(args) => {
+                self.terminal_input(cx, args, caller, MpTerm::press_key)
+            }
+            IpcCommand::TerminalKill(args) => {
+                self.terminal_input(cx, args, caller, |term, _, signal| {
+                    term.signal_foreground(signal)
+                })
+            }
+            IpcCommand::TerminalText(TerminalTextArgs { koma_id, lines }) => {
+                let koma_id = self
+                    .state
+                    .resolve_koma(
+                        koma_id.map(KomaId::from).as_ref(),
+                        caller,
+                        KomaKind::Terminal,
+                    )?
+                    .id
+                    .clone();
+                let fetch_lines = lines.map(|n| n.saturating_add(80));
+                let rows = self
+                    .with_strip(cx, |strip, _| strip.terminal_rows(&koma_id, fetch_lines))
+                    .flatten()
+                    .ok_or_else(|| format!("Terminal not ready: {koma_id}"))?;
+                Ok(IpcPayload::Text {
+                    koma_id: koma_id.into_string(),
+                    text: trim_terminal_rows(rows, lines),
+                })
+            }
+            IpcCommand::TerminalSend(KomaTextArgs { koma_id, text }) => {
+                let koma_id = self
+                    .state
+                    .resolve_koma(
+                        koma_id.map(KomaId::from).as_ref(),
+                        caller,
+                        KomaKind::Terminal,
+                    )?
+                    .id
+                    .clone();
+                let sent = self
+                    .with_strip_mut(cx, |strip, _| strip.send_terminal_text(&koma_id, &text))
+                    .unwrap_or(false);
+                if !sent {
+                    return Err(format!("Terminal not ready: {koma_id}"));
+                }
+                Ok(IpcPayload::KomaId {
+                    koma_id: koma_id.into_string(),
+                })
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn dispatch_drawer(&mut self, cx: &mut Cx, cmd: IpcCommand) -> Result<IpcPayload, String> {
+        match cmd {
             IpcCommand::DrawerList => {
                 let items = self
                     .state
@@ -471,7 +608,7 @@ impl App {
                         cwd: b.cwd.clone(),
                     })
                     .collect();
-                let _ = reply.send(IpcResponse::Ok(IpcPayload::DrawerList { items }));
+                Ok(IpcPayload::DrawerList { items })
             }
             IpcCommand::DrawerKeep(DrawerKeepArgs {
                 input,
@@ -479,20 +616,13 @@ impl App {
                 koma_api,
             }) => {
                 let home_dir = std::env::var("HOME").ok();
-                let expanded = match self.config.expand_alias(&input) {
-                    Ok(Some(v)) => v,
-                    Ok(None) => input.clone(),
-                    Err(err) => {
-                        let _ = reply.send(IpcResponse::err(err));
-                        return;
-                    }
-                };
-                let resp = match parse_open_koma_input_with_engine(
+                let expanded = self.config.expand_alias(&input)?.unwrap_or(input);
+                match parse_open_koma_input_with_engine(
                     &expanded,
                     home_dir.as_deref(),
                     self.config.search_engine,
-                ) {
-                    Ok(KomaInput::Terminal { cwd, .. }) => {
+                )? {
+                    KomaInput::Terminal { cwd, .. } => {
                         let label = title.unwrap_or_else(|| derive_cwd_label(cwd.as_deref()));
                         let item = self.state.keep_koma_in_drawer(
                             KomaKind::Terminal,
@@ -502,64 +632,63 @@ impl App {
                             false,
                         );
                         self.sync_after_mutation(cx, false);
-                        IpcResponse::Ok(IpcPayload::KomaId {
+                        Ok(IpcPayload::KomaId {
                             koma_id: item.id.into_string(),
                         })
                     }
-                    Ok(KomaInput::Web { url, label }) => {
+                    KomaInput::Web { url, label } => {
                         if koma_api && !is_local_html_url(&url) {
-                            IpcResponse::err("--koma-api requires a local .html or .htm file")
-                        } else {
-                            let item = self.state.keep_koma_in_drawer(
-                                KomaKind::Web,
-                                title.unwrap_or(label),
-                                Some(url.clone()),
-                                None,
-                                koma_api,
-                            );
-                            if koma_api {
-                                self.web_runtime()
-                                    .borrow_mut()
-                                    .set_koma_api_enabled(cx, &item.id, true);
-                            }
-                            self.sync_after_mutation(cx, false);
-                            IpcResponse::Ok(IpcPayload::WebKoma(WebKomaData {
-                                koma_id: item.id.into_string(),
-                                url: Some(url),
-                            }))
+                            return Err("--koma-api requires a local .html or .htm file".into());
                         }
+                        let item = self.state.keep_koma_in_drawer(
+                            KomaKind::Web,
+                            title.unwrap_or(label),
+                            Some(url.clone()),
+                            None,
+                            koma_api,
+                        );
+                        if koma_api {
+                            self.web_runtime()
+                                .borrow_mut()
+                                .set_koma_api_enabled(cx, &item.id, true);
+                        }
+                        self.sync_after_mutation(cx, false);
+                        Ok(IpcPayload::WebKoma(WebKomaData {
+                            koma_id: item.id.into_string(),
+                            url: Some(url),
+                        }))
                     }
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
+                }
             }
             IpcCommand::DrawerPlace(KomaTarget { koma_id }) => {
-                let resp = match self.place_drawer_item(cx, koma_id.map(KomaId::from).as_ref()) {
-                    Ok(koma) => IpcResponse::Ok(IpcPayload::KomaId {
-                        koma_id: koma.id.into_string(),
-                    }),
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
+                let koma = self.place_drawer_item(cx, koma_id.map(KomaId::from).as_ref())?;
+                Ok(IpcPayload::KomaId {
+                    koma_id: koma.id.into_string(),
+                })
             }
             IpcCommand::DrawerDiscard(KomaTarget { koma_id }) => {
-                let resp = match self.discard_drawer_item(cx, koma_id.map(KomaId::from).as_ref()) {
-                    Ok(item) => IpcResponse::Ok(IpcPayload::KomaId {
-                        koma_id: item.id.into_string(),
-                    }),
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
+                let item = self.discard_drawer_item(cx, koma_id.map(KomaId::from).as_ref())?;
+                Ok(IpcPayload::KomaId {
+                    koma_id: item.id.into_string(),
+                })
             }
             IpcCommand::DrawerRestore => {
-                let resp = match self.restore_discarded_drawer_item(cx) {
-                    Ok(item) => IpcResponse::Ok(IpcPayload::KomaId {
-                        koma_id: item.id.into_string(),
-                    }),
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
+                let item = self.restore_discarded_drawer_item(cx)?;
+                Ok(IpcPayload::KomaId {
+                    koma_id: item.id.into_string(),
+                })
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn dispatch_notification(
+        &mut self,
+        cx: &mut Cx,
+        cmd: IpcCommand,
+        caller: Option<&KomaId>,
+    ) -> Result<IpcPayload, String> {
+        match cmd {
             IpcCommand::NotificationSend(NotificationSendArgs {
                 koma_id,
                 title,
@@ -571,14 +700,14 @@ impl App {
                     .or_else(|| self.state.focused_koma().map(|b| b.id.clone()))
                     .unwrap_or_else(|| "system".into());
                 let title = title.unwrap_or_else(|| "Koma".into());
-                let entry = self.state.push_notification(source, title.clone(), &body);
+                let entry = self.state.push_notification(source, title, &body);
                 self.render_notifications_overlay(cx);
                 self.update_status(cx);
                 self.show_notification_toast(cx, &entry);
-                let _ = reply.send(IpcResponse::Ok(IpcPayload::NotificationSent {
+                Ok(IpcPayload::NotificationSent {
                     koma_id: entry.koma_id.into_string(),
                     notification_id: entry.id,
-                }));
+                })
             }
             IpcCommand::NotificationList { unread_only } => {
                 let notifications = self
@@ -594,211 +723,74 @@ impl App {
                         unread: n.unread,
                     })
                     .collect();
-                let _ = reply.send(IpcResponse::Ok(IpcPayload::NotificationList {
-                    notifications,
-                }));
+                Ok(IpcPayload::NotificationList { notifications })
             }
-            IpcCommand::NotificationRead { id } => {
-                self.handle_notification_mark(cx, &id, false, reply);
+            IpcCommand::NotificationRead { id } => self.mark_notification_from_ipc(cx, &id, false),
+            IpcCommand::NotificationUnread { id } => self.mark_notification_from_ipc(cx, &id, true),
+            _ => unreachable!(),
+        }
+    }
+
+    fn dispatch_workspace(&mut self, cx: &mut Cx, cmd: IpcCommand, reply: IpcReply) {
+        match cmd {
+            IpcCommand::Health => {
+                let _ = reply.send(IpcResponse::ok());
             }
-            IpcCommand::NotificationUnread { id } => {
-                self.handle_notification_mark(cx, &id, true, reply);
+            IpcCommand::ProfileList => {
+                send_result(
+                    reply,
+                    profiles::root()
+                        .and_then(|root| Profile::list(&root))
+                        .map(|profiles| IpcPayload::ProfileList { profiles }),
+                );
             }
-            IpcCommand::TerminalNew(TerminalNewArgs { cwd, run }) => {
-                if run
-                    .as_deref()
-                    .is_some_and(|command| command.trim().is_empty())
-                {
-                    let _ = reply.send(IpcResponse::err("Terminal command must not be empty"));
-                    return;
-                }
-                let home_dir = std::env::var("HOME").ok();
-                let cwd = cwd
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(|p| expand_tilde(p, home_dir.as_deref()));
-                let koma = self.create_terminal_koma_after(cx, cwd, caller);
-                let resp = match run {
-                    Some(command) => match self.with_terminal_from_ipc(cx, &koma.id, |cx, term| {
-                        term.run_command(cx, &command)
-                    }) {
-                        Ok(()) => IpcResponse::Ok(IpcPayload::KomaId {
-                            koma_id: koma.id.into_string(),
-                        }),
-                        Err(err) => IpcResponse::err(format!(
-                            "Koma {} created, initial command failed: {err}",
-                            koma.id
-                        )),
-                    },
-                    None => IpcResponse::Ok(IpcPayload::KomaId {
-                        koma_id: koma.id.into_string(),
-                    }),
+            IpcCommand::ProfileOpen { id } => {
+                self.open_profile(cx, id, false, move |result| {
+                    send_result(reply, result.map(|()| IpcPayload::Ack));
+                });
+            }
+            IpcCommand::ProfileNew { id } => {
+                self.open_profile(cx, id, true, move |result| {
+                    send_result(reply, result.map(|()| IpcPayload::Ack));
+                });
+            }
+            IpcCommand::ProfileActivate { id } => {
+                let result = if !self.is_private && id == self.state.profile_id {
+                    self.ui.window(cx, ids!(main_window)).show(cx);
+                    Ok(IpcPayload::Ack)
+                } else {
+                    Err("IPC endpoint belongs to a different Profile".into())
                 };
-                let _ = reply.send(resp);
+                send_result(reply, result);
             }
-            IpcCommand::TerminalRun(args) => {
-                let _ = reply.send(self.terminal_input(cx, args, caller, MpTerm::run_command));
+            IpcCommand::WorkspacePrivate => {
+                send_result(
+                    reply,
+                    self.spawn_private_workspace(cx).map(|()| IpcPayload::Ack),
+                );
             }
-            IpcCommand::TerminalPress(args) => {
-                let _ = reply.send(self.terminal_input(cx, args, caller, MpTerm::press_key));
+            IpcCommand::SettingsReload => {
+                let result = self.reload_configs(cx).map(|()| {
+                    self.show_toast(cx, "Reloaded config");
+                    IpcPayload::Ack
+                });
+                send_result(reply, result);
             }
-            IpcCommand::TerminalKill(args) => {
-                let _ = reply.send(self.terminal_input(cx, args, caller, |term, _, signal| {
-                    term.signal_foreground(signal)
-                }));
-            }
-            IpcCommand::WebUrl(KomaTarget { koma_id }) => {
-                let resp = match self.resolve_web_koma(koma_id, caller) {
-                    Ok(koma_id) => {
-                        let (url, title) = self
-                            .web_runtime()
-                            .borrow()
-                            .koma_url_title(&koma_id)
-                            .unwrap_or_else(|| {
-                                let fallback = self
-                                    .state
-                                    .koma_by_id(&koma_id)
-                                    .and_then(|b| b.initial_url.clone())
-                                    .unwrap_or_default();
-                                (fallback, String::new())
-                            });
-                        IpcResponse::Ok(IpcPayload::WebUrl {
-                            koma_id: koma_id.into_string(),
-                            url,
-                            title,
-                        })
-                    }
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
-            }
-            IpcCommand::WebEval(WebEvalArgs { koma_id, script }) => {
-                match self.resolve_web_koma(koma_id, caller) {
-                    Ok(koma_id) => {
-                        self.web_runtime()
-                            .borrow_mut()
-                            .eval_for_ipc(cx, &koma_id, &script, reply);
-                    }
-                    Err(e) => {
-                        let _ = reply.send(IpcResponse::err(e));
-                    }
-                }
-            }
-            IpcCommand::WebScriptTarget(KomaTarget { koma_id }) => {
-                match self.resolve_web_koma(koma_id, caller) {
-                    Ok(koma_id) => self
-                        .web_runtime()
-                        .borrow_mut()
-                        .script_target_for_ipc(cx, koma_id, reply),
-                    Err(err) => {
-                        let _ = reply.send(IpcResponse::err(err));
-                    }
-                }
-            }
-            IpcCommand::WebSnapshot(KomaTarget { koma_id }) => {
-                match self.resolve_web_koma(koma_id, caller) {
-                    Ok(koma_id) => {
-                        self.web_runtime()
-                            .borrow_mut()
-                            .snapshot_for_ipc(cx, &koma_id, reply);
-                    }
-                    Err(e) => {
-                        let _ = reply.send(IpcResponse::err(e));
-                    }
-                }
-            }
-            IpcCommand::WebType(KomaTextArgs { koma_id, text }) => {
-                let resp = match self.resolve_web_koma(koma_id, caller) {
-                    Ok(koma_id) => match self
-                        .web_runtime()
-                        .borrow_mut()
-                        .commit_text(cx, &koma_id, &text)
-                    {
-                        Ok(()) => IpcResponse::Ok(IpcPayload::KomaId {
-                            koma_id: koma_id.into_string(),
-                        }),
-                        Err(e) => IpcResponse::err(e),
-                    },
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
-            }
-            IpcCommand::BenchSpawnWebs { count } => {
-                let mut rt = self.web_runtime().borrow_mut();
-                let mut total = rt.view_count();
-                let mut err = None;
-                for i in 1..=count {
-                    let bid = KomaId::from(format!("bench-web-{i}"));
-                    let url = if i % 2 == 1 {
-                        "https://example.com"
-                    } else {
-                        "https://makepad.nl"
-                    };
-                    match rt.open_extra_koma(cx, &bid, url) {
-                        Ok(n) => total = n,
-                        Err(e) => {
-                            err = Some(e);
-                            break;
-                        }
-                    }
-                }
-                let resp = match err {
-                    Some(e) => IpcResponse::err(e),
-                    None => IpcResponse::Ok(IpcPayload::BenchSpawnWebs { total_views: total }),
-                };
-                let _ = reply.send(resp);
-            }
-            IpcCommand::TerminalText(TerminalTextArgs { koma_id, lines }) => {
-                let resp = match self.state.resolve_koma(
-                    koma_id.map(KomaId::from).as_ref(),
-                    caller,
-                    KomaKind::Terminal,
-                ) {
-                    Ok(koma) => {
-                        let koma_id = koma.id.clone();
-                        let fetch_lines = lines.map(|n| n.saturating_add(80));
-                        let rows = self
-                            .ui
-                            .widget(cx, ids!(sheet_strip))
-                            .borrow::<SheetStrip>()
-                            .and_then(|strip| strip.terminal_rows(&koma_id, fetch_lines));
-                        match rows {
-                            Some(rows) => IpcResponse::Ok(IpcPayload::Text {
-                                koma_id: koma_id.into_string(),
-                                text: trim_terminal_rows(rows, lines),
-                            }),
-                            None => IpcResponse::err(format!("Terminal not ready: {koma_id}")),
-                        }
-                    }
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
-            }
-            IpcCommand::TerminalSend(KomaTextArgs { koma_id, text }) => {
-                let resp = match self.state.resolve_koma(
-                    koma_id.map(KomaId::from).as_ref(),
-                    caller,
-                    KomaKind::Terminal,
-                ) {
-                    Ok(koma) => {
-                        let koma_id = koma.id.clone();
-                        let sent = self
-                            .ui
-                            .widget(cx, ids!(sheet_strip))
-                            .borrow_mut::<SheetStrip>()
-                            .is_some_and(|mut strip| strip.send_terminal_text(&koma_id, &text));
-                        if sent {
-                            IpcResponse::Ok(IpcPayload::KomaId {
-                                koma_id: koma_id.into_string(),
-                            })
-                        } else {
-                            IpcResponse::err(format!("Terminal not ready: {koma_id}"))
-                        }
-                    }
-                    Err(e) => IpcResponse::err(e),
-                };
-                let _ = reply.send(resp);
+            _ => unreachable!(),
+        }
+    }
+
+    fn with_resolved_web_koma(
+        &self,
+        koma_id: Option<String>,
+        caller: Option<&KomaId>,
+        reply: IpcReply,
+        f: impl FnOnce(&mut WebViewRuntime, KomaId, IpcReply),
+    ) {
+        match self.resolve_web_koma(koma_id, caller) {
+            Ok(id) => f(&mut self.web_runtime().borrow_mut(), id, reply),
+            Err(e) => {
+                let _ = reply.send(IpcResponse::err(e));
             }
         }
     }
@@ -809,26 +801,16 @@ impl App {
         args: KomaTextArgs,
         caller: Option<&KomaId>,
         operation: impl FnOnce(&mut MpTerm, &mut Cx, &str) -> Result<(), String>,
-    ) -> IpcResponse {
-        let result = self
-            .state
-            .resolve_koma(
-                args.koma_id.map(KomaId::from).as_ref(),
-                caller,
-                KomaKind::Terminal,
-            )
-            .and_then(|koma| {
-                self.with_terminal_from_ipc(cx, &koma.id, |cx, term| {
-                    operation(term, cx, &args.text)
-                })?;
-                Ok(IpcPayload::KomaId {
-                    koma_id: koma.id.to_string(),
-                })
-            });
-        match result {
-            Ok(payload) => IpcResponse::Ok(payload),
-            Err(err) => IpcResponse::err(err),
-        }
+    ) -> Result<IpcPayload, String> {
+        let koma = self.state.resolve_koma(
+            args.koma_id.map(KomaId::from).as_ref(),
+            caller,
+            KomaKind::Terminal,
+        )?;
+        self.with_terminal_from_ipc(cx, &koma.id, |cx, term| operation(term, cx, &args.text))?;
+        Ok(IpcPayload::KomaId {
+            koma_id: koma.id.to_string(),
+        })
     }
 
     fn with_terminal_from_ipc(
@@ -837,11 +819,10 @@ impl App {
         koma_id: &KomaId,
         operation: impl FnOnce(&mut Cx, &mut MpTerm) -> Result<(), String>,
     ) -> Result<(), String> {
-        let widget = self.ui.widget(cx, ids!(sheet_strip));
-        let strip = widget
-            .borrow::<SheetStrip>()
-            .ok_or("Sheet Strip unavailable")?;
-        strip.with_terminal(koma_id, |term| operation(cx, term))
+        self.with_strip(cx, |strip, cx| {
+            strip.with_terminal(koma_id, |term| operation(cx, term))
+        })
+        .ok_or_else(|| "Sheet Strip unavailable".to_string())?
     }
 
     fn move_koma_from_ipc(
@@ -885,22 +866,16 @@ impl App {
         Ok(())
     }
 
-    fn handle_notification_mark(
+    fn mark_notification_from_ipc(
         &mut self,
         cx: &mut Cx,
         id: &str,
         unread: bool,
-        reply: std::sync::mpsc::SyncSender<IpcResponse>,
-    ) {
-        let resp = match self.state.mark_notification_read(id, unread) {
-            Ok(()) => {
-                self.render_notifications_overlay(cx);
-                self.update_status(cx);
-                IpcResponse::ok()
-            }
-            Err(e) => IpcResponse::err(e),
-        };
-        let _ = reply.send(resp);
+    ) -> Result<IpcPayload, String> {
+        self.state.mark_notification_read(id, unread)?;
+        self.render_notifications_overlay(cx);
+        self.update_status(cx);
+        Ok(IpcPayload::Ack)
     }
 
     fn resolve_web_koma(
