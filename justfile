@@ -44,6 +44,23 @@ run:
     cargo build -p makepad-app-browser-host
     cargo run -p koma-app
 
+# Private Workspace で起動する
+[macos]
+private: bundle-macos
+    env -u KOMA_SOCKET open -n "${CARGO_TARGET_DIR:-target}/debug/Koma.app" --args --private
+
+# Private Workspace で起動する
+[linux]
+private:
+    cargo build -p makepad-app-browser-host
+    env -u KOMA_SOCKET cargo run -p koma-app -- --private
+
+# Private Workspace で起動する
+[windows]
+private:
+    cargo build -p makepad-app-browser-host
+    Remove-Item Env:KOMA_SOCKET -ErrorAction SilentlyContinue; cargo run -p koma-app -- --private
+
 # macOS の開発用 Koma.app を作成する（CEF は just setup で取得）
 [macos]
 bundle-macos:
