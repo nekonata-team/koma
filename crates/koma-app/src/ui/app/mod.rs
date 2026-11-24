@@ -1,6 +1,7 @@
 //! Top-level Makepad application integrating Sheets, KeyboardRouter, SheetStrip, and IPC.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -14,6 +15,7 @@ use koma_app::persistence;
 use koma_core::input::{derive_url_label, KomaInput};
 use koma_core::model::{InputMode, KomaId, KomaKind, KomaMeta, SheetId, WorkspaceState};
 use makepad_app_terminal::widget::MpTermAction;
+use makepad_widgets::makepad_platform::file_dialogs::{FileDialog, FileDialogAction};
 use makepad_widgets::*;
 
 use crate::runtime::ipc_server::IpcServer;
@@ -266,6 +268,14 @@ pub struct App {
     window_focused: bool,
     #[rust]
     last_web_toast: Option<std::time::Instant>,
+    #[rust]
+    next_web_dialog_id: u64,
+    #[rust]
+    pending_web_file_dialogs: HashMap<u64, (makepad_browser_view::ViewId, u64)>,
+    #[rust]
+    pending_web_folder_dialog: Option<(makepad_browser_view::ViewId, u64)>,
+    #[rust]
+    pending_web_downloads: HashMap<u64, (makepad_browser_view::ViewId, u32)>,
 }
 
 impl App {
@@ -1139,6 +1149,10 @@ impl MatchEvent for App {
 
         let mut terminal_metadata_changed = false;
         for action in actions {
+            if let Some(file_action) = action.downcast_ref::<FileDialogAction>() {
+                self.handle_web_file_dialog_action(cx, file_action);
+                continue;
+            }
             if let Some(error) = action.downcast_ref::<lifecycle::ProfileOpenError>() {
                 self.show_toast(cx, error.0.clone());
                 continue;
@@ -1452,6 +1466,38 @@ impl AppMain for App {
                 self.show_toast(cx, err);
             }
         }
+        let file_dialogs = self.web_runtime().borrow_mut().take_file_dialogs();
+        for (view_id, req) in file_dialogs {
+            self.open_web_file_dialog(cx, view_id, req);
+        }
+        let download_requests = self.web_runtime().borrow_mut().take_download_requests();
+        for (view_id, req) in download_requests {
+            self.open_web_download_dialog(cx, view_id, req);
+        }
+        let download_updates = self.web_runtime().borrow_mut().take_download_updates();
+        for upd in download_updates {
+            let toast_id = LiveId::from_str(&format!("download-{}", upd.download_id));
+            let toast = if upd.state == 0 {
+                let title = if upd.percent < 0 {
+                    format!("Downloading {}...", upd.file_name)
+                } else {
+                    format!(
+                        "Downloading {} ({}%)",
+                        upd.file_name,
+                        upd.percent.clamp(0, 100)
+                    )
+                };
+                Toast::new(toast_id, &title).life(ToastLife::Indefinite)
+            } else {
+                let msg = match upd.state {
+                    1 => format!("Saved {}", upd.file_name),
+                    2 => format!("Download canceled: {}", upd.file_name),
+                    _ => format!("Download failed: {}", upd.file_name),
+                };
+                Toast::new(toast_id, &msg)
+            };
+            self.ui.toaster(cx, ids!(toaster)).show(cx, toast);
+        }
         let closed_komas = self.web_runtime().borrow_mut().take_closed_komas();
         for koma_id in closed_komas {
             let _ = self.close_koma_by_id(cx, &koma_id, false);
@@ -1556,6 +1602,175 @@ impl AppMain for App {
         }
 
         self.sync_focus_from_ui(cx);
+    }
+}
+
+impl App {
+    fn next_dialog_live_id(&mut self) -> u64 {
+        self.next_web_dialog_id += 1;
+        self.next_web_dialog_id
+    }
+
+    fn open_web_file_dialog(
+        &mut self,
+        cx: &mut Cx,
+        view_id: makepad_browser_view::ViewId,
+        req: makepad_browser_view::FileDialogEvent,
+    ) {
+        if req.mode == 2 {
+            if let Some((prev_view, prev_req)) = self
+                .pending_web_folder_dialog
+                .replace((view_id, req.request_id))
+            {
+                self.web_runtime()
+                    .borrow_mut()
+                    .resolve_file_dialog(cx, prev_view, prev_req, None);
+            }
+            let mut dialog = FileDialog::new();
+            if !req.title.is_empty() {
+                dialog = dialog.set_title(req.title);
+            }
+            if !req.default_path.is_empty() {
+                dialog = dialog.set_location(PathBuf::from(req.default_path));
+            }
+            cx.open_select_folder_dialog(dialog);
+            return;
+        }
+        let dialog_id = self.next_dialog_live_id();
+        self.pending_web_file_dialogs
+            .insert(dialog_id, (view_id, req.request_id));
+        let mut dialog = FileDialog::new().set_id(LiveId(dialog_id));
+        if !req.title.is_empty() {
+            dialog = dialog.set_title(req.title);
+        }
+        if !req.default_path.is_empty() {
+            let path = PathBuf::from(&req.default_path);
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                dialog = dialog.set_filename(name.to_string());
+            }
+            if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                dialog = dialog.set_location(parent.to_path_buf());
+            }
+        }
+        let exts: Vec<String> = req
+            .accept_filters
+            .iter()
+            .filter_map(|f| f.strip_prefix('.').map(|s| s.to_string()))
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !exts.is_empty() {
+            dialog = dialog.add_filter("Allowed Files".to_string(), exts);
+        }
+        if req.mode == 3 {
+            cx.open_save_file_dialog(dialog);
+        } else {
+            if req.mode == 1 {
+                dialog = dialog.set_multiple(true);
+            }
+            cx.open_select_file_dialog(dialog);
+        }
+    }
+
+    fn open_web_download_dialog(
+        &mut self,
+        cx: &mut Cx,
+        view_id: makepad_browser_view::ViewId,
+        req: makepad_browser_view::DownloadRequestEvent,
+    ) {
+        let dialog_id = self.next_dialog_live_id();
+        self.pending_web_downloads
+            .insert(dialog_id, (view_id, req.download_id));
+        let mut dialog = FileDialog::new()
+            .set_id(LiveId(dialog_id))
+            .set_filename(req.suggested_name);
+        if let Some(dir) = std::env::var_os("HOME")
+            .map(|h| PathBuf::from(h).join("Downloads"))
+            .filter(|p| p.is_dir())
+        {
+            dialog = dialog.set_location(dir);
+        }
+        cx.open_save_file_dialog(dialog);
+    }
+
+    fn handle_web_file_dialog_action(&mut self, cx: &mut Cx, action: &FileDialogAction) {
+        match action {
+            FileDialogAction::FileSelected { id, paths } => {
+                if let Some((view_id, request_id)) = self.pending_web_file_dialogs.remove(&id.0) {
+                    let strs = paths
+                        .iter()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .collect();
+                    self.web_runtime().borrow_mut().resolve_file_dialog(
+                        cx,
+                        view_id,
+                        request_id,
+                        Some(strs),
+                    );
+                }
+            }
+            FileDialogAction::FileCancelled { id } => {
+                if let Some((view_id, request_id)) = self.pending_web_file_dialogs.remove(&id.0) {
+                    self.web_runtime()
+                        .borrow_mut()
+                        .resolve_file_dialog(cx, view_id, request_id, None);
+                }
+            }
+            FileDialogAction::SaveFileSelected { id, path } => {
+                let path_str = path.to_string_lossy().into_owned();
+                if let Some((view_id, request_id)) = self.pending_web_file_dialogs.remove(&id.0) {
+                    self.web_runtime().borrow_mut().resolve_file_dialog(
+                        cx,
+                        view_id,
+                        request_id,
+                        Some(vec![path_str]),
+                    );
+                } else if let Some((view_id, download_id)) =
+                    self.pending_web_downloads.remove(&id.0)
+                {
+                    self.web_runtime().borrow_mut().resolve_download(
+                        cx,
+                        view_id,
+                        download_id,
+                        Some(path_str),
+                    );
+                }
+            }
+            FileDialogAction::SaveFileCancelled { id } => {
+                if let Some((view_id, request_id)) = self.pending_web_file_dialogs.remove(&id.0) {
+                    self.web_runtime()
+                        .borrow_mut()
+                        .resolve_file_dialog(cx, view_id, request_id, None);
+                } else if let Some((view_id, download_id)) =
+                    self.pending_web_downloads.remove(&id.0)
+                {
+                    self.web_runtime().borrow_mut().resolve_download(
+                        cx,
+                        view_id,
+                        download_id,
+                        None,
+                    );
+                }
+            }
+            FileDialogAction::FolderSelected(path) => {
+                if let Some((view_id, request_id)) = self.pending_web_folder_dialog.take() {
+                    let path_str = path.to_string_lossy().into_owned();
+                    self.web_runtime().borrow_mut().resolve_file_dialog(
+                        cx,
+                        view_id,
+                        request_id,
+                        Some(vec![path_str]),
+                    );
+                }
+            }
+            FileDialogAction::FolderCancelled => {
+                if let Some((view_id, request_id)) = self.pending_web_folder_dialog.take() {
+                    self.web_runtime()
+                        .borrow_mut()
+                        .resolve_file_dialog(cx, view_id, request_id, None);
+                }
+            }
+            FileDialogAction::FileLoaded { .. } | FileDialogAction::None => {}
+        }
     }
 }
 

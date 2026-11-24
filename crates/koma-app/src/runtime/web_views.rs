@@ -8,7 +8,10 @@ use koma_core::model::KomaId;
 use koma_ipc::protocol::{
     IpcPayload, IpcResponse, WebReadData, WebScriptTargetData, WebSnapshotData,
 };
-use makepad_browser_view::{BrowserViews, RingShown, ViewId, ViewOp};
+use makepad_browser_view::{
+    BrowserViews, DownloadRequestEvent, DownloadUpdateEvent, FileDialogEvent, RingShown, ViewId,
+    ViewOp,
+};
 use makepad_micro_serde::*;
 use makepad_widgets::*;
 
@@ -194,6 +197,9 @@ pub struct WebViewRuntime {
     pending_popups: Vec<String>,
     pending_popup_views: Vec<(ViewId, String)>,
     pending_external_urls: Vec<String>,
+    pending_file_dialogs: Vec<(ViewId, FileDialogEvent)>,
+    pending_download_requests: Vec<(ViewId, DownloadRequestEvent)>,
+    pending_download_updates: Vec<DownloadUpdateEvent>,
     pending_closed_komas: Vec<KomaId>,
     koma_api_enabled: HashMap<KomaId, bool>,
     koma_api_injected_url: HashMap<KomaId, String>,
@@ -222,6 +228,9 @@ impl WebViewRuntime {
             pending_popups: Vec::new(),
             pending_popup_views: Vec::new(),
             pending_external_urls: Vec::new(),
+            pending_file_dialogs: Vec::new(),
+            pending_download_requests: Vec::new(),
+            pending_download_updates: Vec::new(),
             pending_closed_komas: Vec::new(),
             koma_api_enabled: HashMap::new(),
             koma_api_injected_url: HashMap::new(),
@@ -500,6 +509,47 @@ impl WebViewRuntime {
 
     pub fn take_closed_komas(&mut self) -> Vec<KomaId> {
         std::mem::take(&mut self.pending_closed_komas)
+    }
+
+    pub fn take_file_dialogs(&mut self) -> Vec<(ViewId, FileDialogEvent)> {
+        std::mem::take(&mut self.pending_file_dialogs)
+    }
+
+    pub fn resolve_file_dialog(
+        &mut self,
+        cx: &mut Cx,
+        view_id: ViewId,
+        request_id: u64,
+        paths: Option<Vec<String>>,
+    ) {
+        self.views
+            .send(view_id, ViewOp::FileDialogResult { request_id, paths });
+        self.views.service(cx);
+    }
+
+    pub fn take_download_requests(&mut self) -> Vec<(ViewId, DownloadRequestEvent)> {
+        std::mem::take(&mut self.pending_download_requests)
+    }
+
+    pub fn take_download_updates(&mut self) -> Vec<DownloadUpdateEvent> {
+        std::mem::take(&mut self.pending_download_updates)
+    }
+
+    pub fn resolve_download(
+        &mut self,
+        cx: &mut Cx,
+        view_id: ViewId,
+        download_id: u32,
+        save_path: Option<String>,
+    ) {
+        self.views.send(
+            view_id,
+            ViewOp::DownloadResult {
+                download_id,
+                save_path,
+            },
+        );
+        self.views.service(cx);
     }
 
     pub fn bind_popup_view(&mut self, cx: &mut Cx, koma_id: &KomaId, view_id: ViewId, url: &str) {
@@ -898,6 +948,23 @@ impl WebViewRuntime {
                 self.pending_external_urls.extend(external_urls);
                 changed = true;
             }
+            let file_dialogs = self.views.take_file_dialogs(id);
+            if !file_dialogs.is_empty() {
+                self.pending_file_dialogs
+                    .extend(file_dialogs.into_iter().map(|req| (id, req)));
+                changed = true;
+            }
+            let download_requests = self.views.take_download_requests(id);
+            if !download_requests.is_empty() {
+                self.pending_download_requests
+                    .extend(download_requests.into_iter().map(|req| (id, req)));
+                changed = true;
+            }
+            let download_updates = self.views.take_download_updates(id);
+            if !download_updates.is_empty() {
+                self.pending_download_updates.extend(download_updates);
+                changed = true;
+            }
             if self.views.take_closed(id) {
                 if let Some(koma_id) = self.view_to_koma.get(&id).cloned() {
                     self.pending_closed_komas.push(koma_id);
@@ -941,6 +1008,9 @@ impl WebViewRuntime {
         self.pending_popups.clear();
         self.pending_popup_views.clear();
         self.pending_external_urls.clear();
+        self.pending_file_dialogs.clear();
+        self.pending_download_requests.clear();
+        self.pending_download_updates.clear();
         self.pending_closed_komas.clear();
         self.koma_api_enabled.clear();
         self.koma_api_injected_url.clear();
