@@ -58,6 +58,8 @@ pub struct WebKoma {
     initial_url: String,
     #[rust]
     last_click_local: Option<Vec2d>,
+    #[rust(1.0)]
+    page_zoom: f64,
 }
 
 impl WebKoma {
@@ -87,6 +89,23 @@ impl WebKoma {
             rt.views_mut().service(cx);
             true
         }) == Some(true)
+    }
+
+    pub fn page_zoom(&self) -> f64 {
+        self.page_zoom
+    }
+
+    pub fn set_page_zoom(&mut self, cx: &mut Cx, factor: f64, reset: bool) {
+        let op = if reset {
+            ViewOp::ResetZoom
+        } else if self.page_zoom != factor {
+            ViewOp::PageZoom { factor }
+        } else {
+            return;
+        };
+        if self.send_view_op(cx, op) {
+            self.page_zoom = factor;
+        }
     }
 
     pub fn focus(&mut self, cx: &mut Cx) -> bool {

@@ -27,6 +27,25 @@ fn send_batch(sender: &std::sync::mpsc::Sender<Vec<u8>>, msgs: Vec<StudioToApp>)
     send_to_app(sender, msgs);
 }
 
+fn send_primary_key(sender: &std::sync::mpsc::Sender<Vec<u8>>, key_code: KeyCode, time: f64) {
+    send_batch(
+        sender,
+        vec![
+            StudioToApp::KeyDown(KeyEvent {
+                key_code,
+                modifiers: KeyModifiers {
+                    logo: cfg!(target_os = "macos"),
+                    control: !cfg!(target_os = "macos"),
+                    ..Default::default()
+                },
+                time,
+                ..Default::default()
+            }),
+            StudioToApp::Tick,
+        ],
+    );
+}
+
 #[test]
 fn headless_stdin_loop_handles_keys_and_ipc() {
     let cx = Cx::new(Box::new(|_, _| {}));
@@ -424,6 +443,14 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
             ],
         );
         assert_eq!(grid("SHRUNK"), base);
+        send_primary_key(&sender, KeyCode::Minus, 2.6);
+        let small = grid("KEYBOARD");
+        assert!(
+            small[0] > base[0] && small[1] > base[1],
+            "{small:?} vs {base:?}"
+        );
+        send_primary_key(&sender, KeyCode::Key0, 2.7);
+        assert_eq!(grid("DEFAULT"), base);
 
         let reported_cwd = tmp.join("terminal cwd");
         std::fs::create_dir(&reported_cwd).unwrap();
@@ -596,4 +623,24 @@ fn verify_web_zoom(
     assert!(wait_number(&a, "visualViewport.offsetTop", &|_| true) > 20.0);
     pinch(0.86);
     wait_number(&a, "visualViewport.scale", &|scale| scale < enlarged - 0.1);
+
+    pinch(1.13);
+    let visual = wait_number(&a, "visualViewport.scale", &|scale| scale > 1.1);
+    let other_width = wait_number(&b, "innerWidth", &|_| true);
+    ipc(IpcCommand::KomaFocus { koma_id: a.clone() }).unwrap();
+    send_primary_key(sender, KeyCode::Equals, 6.0);
+    let zoomed_width = |value: f64| (value - width / 1.1).abs() <= 1.0;
+    wait_number(&a, "innerWidth", &zoomed_width);
+    assert_eq!(wait_number(&b, "innerWidth", &|_| true), other_width);
+    assert!((wait_number(&a, "visualViewport.scale", &|_| true) - visual).abs() < 0.01);
+
+    send_primary_key(sender, KeyCode::Minus, 6.1);
+    wait_number(&a, "innerWidth", &|value| value == width);
+    send_primary_key(sender, KeyCode::Equals, 6.2);
+    wait_number(&a, "innerWidth", &zoomed_width);
+    send_primary_key(sender, KeyCode::Key0, 6.3);
+    wait_number(&a, "innerWidth", &|value| value == width);
+    wait_number(&a, "visualViewport.scale", &|scale| scale == base);
+    pinch(1.13);
+    wait_number(&a, "visualViewport.scale", &|scale| scale > 1.1);
 }

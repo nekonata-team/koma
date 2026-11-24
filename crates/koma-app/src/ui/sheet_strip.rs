@@ -972,6 +972,27 @@ impl SheetStrip {
         operation(&mut term)
     }
 
+    pub fn adjust_content_zoom(&mut self, cx: &mut Cx, koma_id: &KomaId, step: i8) {
+        self.end_content_pinch(cx);
+        let Some(widget) = self.koma_widgets.get(koma_id) else {
+            return;
+        };
+        let next = |factor: f64| {
+            if step == 0 {
+                1.0
+            } else {
+                ((factor * 10.0).round() + f64::from(step)).clamp(5.0, 20.0) / 10.0
+            }
+        };
+        if let Some(mut term) = widget.borrow_mut::<MpTerm>() {
+            let factor = next(term.cell_size().1);
+            term.set_presentation_font_scale(cx, factor);
+        } else if let Some(mut web) = widget.borrow_mut::<WebKoma>() {
+            let factor = next(web.page_zoom());
+            web.set_page_zoom(cx, factor, step == 0);
+        }
+    }
+
     fn send_web_pinch(&self, cx: &mut Cx, koma_id: &KomaId, op: ViewOp) {
         if let Some(web) = self
             .koma_widgets

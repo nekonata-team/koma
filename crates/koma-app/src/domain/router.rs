@@ -83,6 +83,7 @@ pub enum RouteDecision {
     MoveFocusedKoma(isize),
     MoveFocusedKomaToSheet(isize),
     ResizeFocusedKoma(isize),
+    ContentZoom(i8),
     CycleWidthPreset,
     ApplyWidthPreset(usize),
     EnterWidthMode,
@@ -332,7 +333,9 @@ pub fn route_key_with_bindings(
         Some(Some(decision)) => return *decision,
         Some(None) => {}
         None => {
-            if let Some(global) = route_global(stroke) {
+            if let Some(global) = route_global(stroke).filter(|action| {
+                mode != InputMode::Overview || !matches!(action, RouteDecision::ContentZoom(_))
+            }) {
                 return global;
             }
         }
@@ -514,6 +517,10 @@ fn route_global_with_primary(stroke: KeyStroke, primary_is_logo: bool) -> Option
                 RouteDecision::OpenKomaPrompt
             }),
             Key::L => Some(RouteDecision::EditFocusedUrl),
+            Key::Minus | Key::Semicolon if stroke.shift => Some(RouteDecision::ContentZoom(1)),
+            Key::Equals | Key::Plus => Some(RouteDecision::ContentZoom(1)),
+            Key::Minus => Some(RouteDecision::ContentZoom(-1)),
+            Key::Digit(0) if !stroke.shift => Some(RouteDecision::ContentZoom(0)),
             Key::W => Some(if stroke.shift {
                 RouteDecision::CloseCurrentSheet
             } else {
@@ -560,6 +567,36 @@ mod tests {
                 }
             ),
             RouteDecision::Forward
+        );
+    }
+
+    #[test]
+    fn primary_zoom_keys_control_content_except_in_overview() {
+        let primary = |key| KeyStroke {
+            logo: PRIMARY_IS_LOGO,
+            ctrl: !PRIMARY_IS_LOGO,
+            ..self::key(key)
+        };
+        for mode in [InputMode::ContentInput, InputMode::KomaMode] {
+            for (key, step) in [
+                (Key::Equals, 1),
+                (Key::Plus, 1),
+                (Key::Minus, -1),
+                (Key::Digit(0), 0),
+            ] {
+                assert_eq!(
+                    route_key(mode, false, primary(key)),
+                    RouteDecision::ContentZoom(step)
+                );
+            }
+        }
+        assert_eq!(
+            route_key(InputMode::Overview, false, primary(Key::Equals)),
+            RouteDecision::OverviewZoom(1)
+        );
+        assert_eq!(
+            route_key(InputMode::Overview, false, primary(Key::Digit(0))),
+            RouteDecision::OverviewZoomReset
         );
     }
 

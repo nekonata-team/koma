@@ -797,6 +797,17 @@ impl App {
                     self.sync_after_mutation(cx, true);
                 }
             }
+            RouteDecision::ContentZoom(step) => {
+                if let Some(koma) = self.state.focused_koma() {
+                    if let Some(mut strip) = self
+                        .ui
+                        .widget(cx, ids!(sheet_strip))
+                        .borrow_mut::<SheetStrip>()
+                    {
+                        strip.adjust_content_zoom(cx, &koma.id, step);
+                    }
+                }
+            }
             RouteDecision::CycleWidthPreset => {
                 if self.state.cycle_width_preset(&self.config.width_presets) {
                     self.sync_after_mutation(cx, true);

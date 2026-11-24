@@ -27,6 +27,8 @@ just run
 | 隣の Koma に移動 | `Cmd+Opt+←` / `Cmd+Opt+→` |
 | 前後の Sheet に移動 | `Cmd+Opt+↑` / `Cmd+Opt+↓` |
 | Overview で全体を見渡す | `Cmd+Shift+O` |
+| 表示を拡大・縮小 | `Cmd+=` / `Cmd+-` |
+| 表示倍率をリセット | `Cmd+0` |
 | Koma を閉じる | `Cmd+W` |
 | Koma Mode に入る／抜ける | `Ctrl+,` |
 
@@ -41,6 +43,8 @@ Koma Mode では `h` / `l` で隣の Koma にフォーカスを移し、`j` / `k
 
 Koma の上でトラックパッドをピンチすると、Terminal は文字サイズが変わり、Web はページのレイアウトを保ったままポインタ付近を拡大・縮小します。
 Koma の枠は変わりません。
+キー操作ではフォーカス中の Terminal の文字サイズ、または Web のページ全体の表示倍率が変わります。
+Web はキーで倍率を変えると再レイアウトし、`Cmd+0` でページズームとピンチの両方が元に戻ります。
 
 Palette の `> Reopen closed Koma` または Koma Mode の `u` で、閉じた Koma を開き直せます。
 端末は最後に保存した作業ディレクトリで新しいシェルを開きます。
