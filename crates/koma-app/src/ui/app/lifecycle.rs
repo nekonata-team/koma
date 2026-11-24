@@ -230,12 +230,34 @@ impl App {
                 }
             }
         }
+        self.apply_theme(cx);
         self.sync_strip(cx, true);
         self.apply_focus(cx);
         self.update_status(cx);
         if let Some(err) = startup_err {
             self.show_toast(cx, err);
         }
+    }
+
+    pub(super) fn apply_theme(&mut self, cx: &mut Cx) {
+        let host_dark = makepad_widgets::makepad_draw::host_dark().unwrap_or(true);
+        let is_dark = self.config.theme.appearance.is_dark(host_dark);
+        let base_theme = if is_dark {
+            BaseTheme::Dark
+        } else {
+            BaseTheme::Light
+        };
+        set_base_theme(cx, base_theme);
+        set_app_theme_tokens(cx, self.config.theme.app_theme_tokens_script());
+        cx.request_style_reload();
+        if let Some(mut strip) = self
+            .ui
+            .widget(cx, ids!(sheet_strip))
+            .borrow_mut::<SheetStrip>()
+        {
+            strip.set_theme(is_dark);
+        }
+        self.ui.redraw(cx);
     }
 
     pub(super) fn reload_configs(&mut self, cx: &mut Cx) -> Result<(), String> {
@@ -260,6 +282,7 @@ impl App {
             strip.set_center_focused(self.config.center_focused);
             strip.set_koma_gap(self.config.koma_gap);
         }
+        self.apply_theme(cx);
         if let Some(first_err) = diagnostics.into_iter().next() {
             return Err(first_err);
         }

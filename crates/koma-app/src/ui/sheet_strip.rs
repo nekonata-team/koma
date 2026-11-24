@@ -95,31 +95,31 @@ script_mod! {
         }
         web_template: WebKoma{}
         draw_strip_bg +: {
-            color: #x0f111a
+            color: theme.color_surface
         }
         draw_overview_bg +: {
-            color: #x080a10
+            color: theme.color_surface_dim
         }
         draw_sheet_bg +: {
-            color: #x121622
+            color: theme.color_surface_container_low
         }
         draw_border +: {
-            color: #x293045
+            color: theme.color_outline_variant
         }
         draw_header +: {
-            color: #x161a26
+            color: theme.color_surface_container
         }
         draw_drop_bar +: {
-            color: #x38bdf8
+            color: theme.color_primary
         }
         draw_title +: {
-            color: #xe2e8f0
+            color: theme.color_on_surface
             text_style: theme.font_regular{
                 font_size: 11
             }
         }
         draw_sheet_label +: {
-            color: #x94a3b8
+            color: theme.color_on_surface_variant
             text_style: theme.font_regular{
                 font_size: 20
             }
@@ -320,6 +320,52 @@ impl ReorderSlide {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct StripThemeColors {
+    dark: bool,
+    koma_mode_border: Vec4f,
+    koma_mode_header: Vec4f,
+    overview_focus_header: Vec4f,
+    inactive_border: Vec4f,
+    inactive_header: Vec4f,
+    hover_border: Vec4f,
+    hover_header: Vec4f,
+}
+
+impl Default for StripThemeColors {
+    fn default() -> Self {
+        Self::for_scheme(true)
+    }
+}
+
+impl StripThemeColors {
+    fn for_scheme(dark: bool) -> Self {
+        if dark {
+            Self {
+                dark: true,
+                koma_mode_border: vec4(0.22, 0.74, 0.97, 1.0),
+                koma_mode_header: vec4(0.11, 0.22, 0.33, 1.0),
+                overview_focus_header: vec4(0.11, 0.25, 0.38, 1.0),
+                inactive_border: vec4(0.16, 0.19, 0.27, 1.0),
+                inactive_header: vec4(0.09, 0.10, 0.15, 1.0),
+                hover_border: vec4(0.48, 0.64, 0.97, 1.0),
+                hover_header: vec4(0.14, 0.19, 0.30, 1.0),
+            }
+        } else {
+            Self {
+                dark: false,
+                koma_mode_border: vec4(0.02, 0.52, 0.78, 1.0),
+                koma_mode_header: vec4(0.82, 0.93, 0.98, 1.0),
+                overview_focus_header: vec4(0.82, 0.93, 0.98, 1.0),
+                inactive_border: vec4(0.78, 0.81, 0.86, 1.0),
+                inactive_header: vec4(0.91, 0.93, 0.96, 1.0),
+                hover_border: vec4(0.35, 0.55, 0.95, 1.0),
+                hover_header: vec4(0.88, 0.92, 0.98, 1.0),
+            }
+        }
+    }
+}
+
 #[derive(Script, ScriptHook, Widget)]
 pub struct SheetStrip {
     #[uid]
@@ -381,6 +427,8 @@ pub struct SheetStrip {
     discard_scroll_continuation: bool,
     #[rust]
     center_focused: CenterFocused,
+    #[rust]
+    theme_colors: StripThemeColors,
     #[rust(STRIP_SPACING)]
     koma_gap: f64,
     #[rust]
@@ -1254,23 +1302,34 @@ impl SheetStrip {
     }
 
     fn slot_colors(&self, focused: bool, hovered: bool) -> (Vec4f, Vec4f) {
+        let t = &self.theme_colors;
         if self.mode == InputMode::Overview {
             if focused {
-                return (vec4(0.22, 0.74, 0.97, 1.0), vec4(0.11, 0.25, 0.38, 1.0));
+                return (t.koma_mode_border, t.overview_focus_header);
             }
             if hovered {
-                return (vec4(0.48, 0.64, 0.97, 1.0), vec4(0.14, 0.19, 0.30, 1.0));
+                return (t.hover_border, t.hover_header);
             }
-            return (vec4(0.16, 0.19, 0.27, 1.0), vec4(0.09, 0.10, 0.15, 1.0));
+            return (t.inactive_border, t.inactive_header);
         }
         if !focused {
-            return (vec4(0.16, 0.19, 0.27, 1.0), vec4(0.09, 0.10, 0.15, 1.0));
+            return (t.inactive_border, t.inactive_header);
         }
         match self.mode {
-            InputMode::KomaMode => (vec4(0.22, 0.74, 0.97, 1.0), vec4(0.11, 0.22, 0.33, 1.0)),
-            InputMode::ContentInput => (vec4(0.23, 0.51, 0.96, 1.0), vec4(0.13, 0.17, 0.27, 1.0)),
-            InputMode::Overview => (vec4(0.22, 0.74, 0.97, 1.0), vec4(0.11, 0.25, 0.38, 1.0)),
+            InputMode::KomaMode => (t.koma_mode_border, t.koma_mode_header),
+            InputMode::ContentInput => {
+                // Reuse `draw_drop_bar.color` so ContentInput focus tracks `theme.color_primary`.
+                let accent = self.draw_drop_bar.color;
+                let mix = if t.dark { 0.20 } else { 0.14 };
+                let header = t.inactive_header * (1.0 - mix) + accent * mix;
+                (accent, vec4(header.x, header.y, header.z, 1.0))
+            }
+            InputMode::Overview => (t.koma_mode_border, t.overview_focus_header),
         }
+    }
+
+    pub fn set_theme(&mut self, dark: bool) {
+        self.theme_colors = StripThemeColors::for_scheme(dark);
     }
 
     fn draw_card(

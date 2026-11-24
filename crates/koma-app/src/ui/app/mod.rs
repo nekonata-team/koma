@@ -62,7 +62,7 @@ script_mod! {
                             flow: Down
                             padding: Inset{left: 14 right: 14 top: 10 bottom: 10}
                             spacing: 8
-                            draw_bg.color: #x1a1e2e
+                            draw_bg.color: theme.color_surface_container_high
                             draw_bg.border_radius: 8.0
 
                             View{
@@ -75,7 +75,7 @@ script_mod! {
                                 prompt_label := Label{
                                     width: Fit
                                     text: "Palette:"
-                                    draw_text.color: #x7aa2f7
+                                    draw_text.color: theme.color_primary
                                 }
 
                                 prompt_input := TextInputFlat{
@@ -92,7 +92,7 @@ script_mod! {
                             palette_candidates := Label{
                                 width: Fill
                                 text: ""
-                                draw_text.color: #x94a3b8
+                                draw_text.color: theme.color_on_surface_variant
                             }
                         }
                     }
@@ -111,19 +111,19 @@ script_mod! {
                             flow: Down
                             padding: Inset{left: 14 right: 14 top: 10 bottom: 10}
                             spacing: 8
-                            draw_bg.color: #x181d2c
+                            draw_bg.color: theme.color_surface_container_high
                             draw_bg.border_radius: 8.0
 
                             drawer_title := Label{
                                 width: Fill
                                 text: "Drawer (Enter: place, d/x: discard, u: restore, Tab/Esc: close)"
-                                draw_text.color: #x7aa2f7
+                                draw_text.color: theme.color_primary
                             }
 
                             drawer_list := Label{
                                 width: Fill
                                 text: "(empty)"
-                                draw_text.color: #xc0caf5
+                                draw_text.color: theme.color_on_surface
                             }
                         }
                     }
@@ -142,19 +142,19 @@ script_mod! {
                             flow: Down
                             padding: Inset{left: 14 right: 14 top: 10 bottom: 10}
                             spacing: 8
-                            draw_bg.color: #x181d2c
+                            draw_bg.color: theme.color_surface_container_high
                             draw_bg.border_radius: 8.0
 
                             notifications_title := Label{
                                 width: Fill
                                 text: "Notifications (Enter: jump to koma, r: toggle read, m/Esc: close)"
-                                draw_text.color: #x7aa2f7
+                                draw_text.color: theme.color_primary
                             }
 
                             notifications_list := Label{
                                 width: Fill
                                 text: "(no notifications)"
-                                draw_text.color: #xc0caf5
+                                draw_text.color: theme.color_on_surface
                             }
                         }
                     }

@@ -29,6 +29,67 @@ impl CenterFocused {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ThemeAppearance {
+    #[default]
+    Dark,
+    Light,
+    System,
+}
+
+impl ThemeAppearance {
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "dark" => Ok(Self::Dark),
+            "light" => Ok(Self::Light),
+            "system" => Ok(Self::System),
+            other => Err(format!(
+                "Unknown theme.appearance '{other}' (expected: dark, light, system)"
+            )),
+        }
+    }
+
+    pub fn is_dark(self, host_dark: bool) -> bool {
+        match self {
+            Self::Dark => true,
+            Self::Light => false,
+            Self::System => host_dark,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ThemeConfig {
+    pub appearance: ThemeAppearance,
+    pub accent: Option<[f32; 4]>,
+}
+
+impl ThemeConfig {
+    /// Emits `mod.theme.color_primary` for Makepad's `set_app_theme_tokens`.
+    pub fn app_theme_tokens_script(&self) -> Option<String> {
+        let [r, g, b, a] = self.accent?;
+        Some(format!(
+            "mod.theme.color_primary = #{:02x}{:02x}{:02x}{:02x}",
+            (r * 255.0).round() as u8,
+            (g * 255.0).round() as u8,
+            (b * 255.0).round() as u8,
+            (a * 255.0).round() as u8,
+        ))
+    }
+}
+
+fn parse_hex_color(raw: &str, key: &str) -> Result<[f32; 4], String> {
+    let hex = raw.trim().strip_prefix('#').unwrap_or(raw.trim());
+    if !matches!(hex.len(), 6 | 8) || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!(
+            "theme.{key} must be a 6- or 8-digit hex color (e.g. #3b82f6)"
+        ));
+    }
+    let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0) as f32 / 255.0;
+    let a = if hex.len() == 8 { byte(6) } else { 1.0 };
+    Ok([byte(0), byte(2), byte(4), a])
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TerminalConfig {
     pub shell: Option<String>,
@@ -55,6 +116,7 @@ pub struct Config {
     pub sheet_presets: Vec<SheetPresetConfig>,
     pub search_engine: SearchEngine,
     pub terminal: TerminalConfig,
+    pub theme: ThemeConfig,
     pub keybindings: Keybindings,
 }
 
@@ -69,6 +131,7 @@ impl Default for Config {
             sheet_presets: Vec::new(),
             search_engine: SearchEngine::default(),
             terminal: TerminalConfig::default(),
+            theme: ThemeConfig::default(),
             keybindings: Keybindings::default(),
         }
     }
@@ -217,6 +280,19 @@ impl Config {
                     .filter(|s| !s.is_empty())
                     .ok_or("terminal.session_list_command must be a non-empty string")?;
                 config.terminal.session_list_command = Some(cmd.to_string());
+            }
+        }
+        if let Some(theme) = table.get("theme") {
+            let tbl = theme.as_table().ok_or("[theme] must be a table")?;
+            for (key, value) in tbl {
+                let raw = value
+                    .as_str()
+                    .ok_or_else(|| format!("theme.{key} must be a string"))?;
+                match key.as_str() {
+                    "appearance" => config.theme.appearance = ThemeAppearance::parse(raw)?,
+                    "accent" => config.theme.accent = Some(parse_hex_color(raw, key)?),
+                    other => return Err(format!("Unknown theme.{other} key")),
+                }
             }
         }
         if let Some(kb) = table.get("keybindings") {
@@ -436,5 +512,28 @@ b = ":a"
         assert!(Config::parse("[keybindings.invalid]\n\"a\" = \"toggle_overview\"").is_err());
         assert!(Config::parse("[keybindings.koma]\n\"ctrl++\" = \"toggle_overview\"").is_err());
         assert!(Config::parse("[keybindings.koma]\n\"y\" = \"unknown_action\"").is_err());
+    }
+
+    #[test]
+    fn parses_theme_appearance_and_accent() {
+        let cfg = Config::parse(
+            r##"
+[theme]
+appearance = "system"
+accent = "#112233cc"
+"##,
+        )
+        .unwrap();
+        assert_eq!(cfg.theme.appearance, ThemeAppearance::System);
+        assert!(cfg.theme.appearance.is_dark(true));
+        assert!(!cfg.theme.appearance.is_dark(false));
+        assert_eq!(
+            cfg.theme.app_theme_tokens_script().as_deref(),
+            Some("mod.theme.color_primary = #112233cc")
+        );
+
+        assert!(Config::parse("[theme]\nappearance = \"sepia\"").is_err());
+        assert!(Config::parse("[theme]\naccent = \"red\"").is_err());
+        assert!(Config::parse("[theme]\nunknown_key = \"#ffffff\"").is_err());
     }
 }
