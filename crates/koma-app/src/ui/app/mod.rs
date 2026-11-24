@@ -15,6 +15,7 @@ use koma_app::persistence;
 use koma_core::input::{derive_url_label, KomaInput};
 use koma_core::model::{InputMode, KomaId, KomaKind, KomaMeta, SheetId, WorkspaceState};
 use makepad_app_terminal::widget::MpTermAction;
+use makepad_micro_serde::*;
 use makepad_widgets::makepad_platform::file_dialogs::{FileDialog, FileDialogAction};
 use makepad_widgets::*;
 
@@ -309,6 +310,16 @@ pub struct App {
     active_web_modal: Option<WebModalRequest>,
     #[rust]
     web_modal_queue: std::collections::VecDeque<WebModalRequest>,
+    #[rust]
+    site_permissions: HashMap<String, SitePermissionRecord>,
+}
+
+#[derive(Clone, Debug, Default, SerJson, DeJson)]
+struct SitePermissionRecord {
+    camera: Option<bool>,
+    microphone: Option<bool>,
+    geolocation: Option<bool>,
+    desktop_capture: Option<bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -320,6 +331,10 @@ enum WebModalRequest {
     Auth {
         view_id: makepad_browser_view::ViewId,
         req: makepad_browser_view::AuthRequestEvent,
+    },
+    Permission {
+        view_id: makepad_browser_view::ViewId,
+        req: makepad_browser_view::SitePermissionEvent,
     },
 }
 
@@ -1576,6 +1591,19 @@ impl AppMain for App {
         for (view_id, req) in auth_requests {
             self.enqueue_web_modal(cx, WebModalRequest::Auth { view_id, req });
         }
+        let permission_requests = self.web_runtime().borrow_mut().take_permission_requests();
+        for (view_id, req) in permission_requests {
+            if let Some(granted) = self.check_site_permission(&req.origin, req.permissions) {
+                self.web_runtime().borrow_mut().resolve_permission_request(
+                    cx,
+                    view_id,
+                    req.request_id,
+                    granted,
+                );
+            } else {
+                self.enqueue_web_modal(cx, WebModalRequest::Permission { view_id, req });
+            }
+        }
         let closed_komas = self.web_runtime().borrow_mut().take_closed_komas();
         for koma_id in closed_komas {
             let _ = self.close_koma_by_id(cx, &koma_id, false);
@@ -1936,6 +1964,31 @@ impl App {
                 );
                 input.set_key_focus(cx);
             }
+            WebModalRequest::Permission { req, .. } => {
+                let origin = if req.origin.is_empty() {
+                    "This site".to_string()
+                } else {
+                    req.origin.clone()
+                };
+                let labels = site_permission_labels(req.permissions);
+                self.ui
+                    .label(cx, ids!(web_modal_origin))
+                    .set_text(cx, &origin);
+                self.ui
+                    .label(cx, ids!(web_modal_message))
+                    .set_text(cx, &format!("Allow access to {}?", labels.join(", ")));
+                input.set_visible(cx, false);
+                input.set_text(cx, "");
+                password.set_visible(cx, false);
+                password.set_text(cx, "");
+                self.active_web_modal = Some(request);
+                self.ui.dialog(cx, ids!(web_modal_dialog)).ask(
+                    cx,
+                    "Permission request",
+                    "Allow",
+                    "Deny",
+                );
+            }
         }
     }
 
@@ -1971,9 +2024,113 @@ impl App {
                     password_text,
                 );
             }
+            WebModalRequest::Permission { view_id, req } => {
+                self.record_site_permission(&req.origin, req.permissions, accepted);
+                self.web_runtime().borrow_mut().resolve_permission_request(
+                    cx,
+                    view_id,
+                    req.request_id,
+                    accepted,
+                );
+            }
         }
         self.present_next_web_modal(cx);
     }
+
+    pub(super) fn load_site_permissions(&mut self, state_dir: &std::path::Path) {
+        let path = state_dir.join("site_permissions.json");
+        let Ok(raw) = std::fs::read_to_string(path) else {
+            return;
+        };
+        if let Ok(entries) = HashMap::<String, SitePermissionRecord>::deserialize_json(&raw) {
+            self.site_permissions = entries;
+        }
+    }
+
+    fn save_site_permissions(&self) {
+        if self.is_private {
+            return;
+        }
+        let Some(dir) = self.state_dir.as_ref() else {
+            return;
+        };
+        let path = dir.join("site_permissions.json");
+        let tmp = dir.join("site_permissions.json.tmp");
+        let json = self.site_permissions.serialize_json();
+        let _ = std::fs::write(&tmp, json).and_then(|()| std::fs::rename(&tmp, &path));
+    }
+
+    fn check_site_permission(&self, origin: &str, permissions: u32) -> Option<bool> {
+        if origin.is_empty() || (permissions & SITE_PERMISSION_OTHER) != 0 {
+            return None;
+        }
+        let rec = self.site_permissions.get(origin)?;
+        let checks = [
+            (SITE_PERMISSION_CAMERA, rec.camera),
+            (SITE_PERMISSION_MICROPHONE, rec.microphone),
+            (SITE_PERMISSION_GEOLOCATION, rec.geolocation),
+            (SITE_PERMISSION_DESKTOP_CAPTURE, rec.desktop_capture),
+        ];
+        let mut any_requested = false;
+        let mut all_allowed = true;
+        for (bit, saved) in checks {
+            if (permissions & bit) != 0 {
+                any_requested = true;
+                match saved {
+                    Some(false) => return Some(false),
+                    Some(true) => {}
+                    None => all_allowed = false,
+                }
+            }
+        }
+        (any_requested && all_allowed).then_some(true)
+    }
+
+    fn record_site_permission(&mut self, origin: &str, permissions: u32, granted: bool) {
+        if origin.is_empty() || (permissions & SITE_PERMISSION_OTHER) != 0 {
+            return;
+        }
+        let rec = self.site_permissions.entry(origin.to_string()).or_default();
+        if (permissions & SITE_PERMISSION_CAMERA) != 0 {
+            rec.camera = Some(granted);
+        }
+        if (permissions & SITE_PERMISSION_MICROPHONE) != 0 {
+            rec.microphone = Some(granted);
+        }
+        if (permissions & SITE_PERMISSION_GEOLOCATION) != 0 {
+            rec.geolocation = Some(granted);
+        }
+        if (permissions & SITE_PERMISSION_DESKTOP_CAPTURE) != 0 {
+            rec.desktop_capture = Some(granted);
+        }
+        self.save_site_permissions();
+    }
+}
+
+const SITE_PERMISSION_CAMERA: u32 = 1 << 0;
+const SITE_PERMISSION_MICROPHONE: u32 = 1 << 1;
+const SITE_PERMISSION_GEOLOCATION: u32 = 1 << 2;
+const SITE_PERMISSION_DESKTOP_CAPTURE: u32 = 1 << 3;
+const SITE_PERMISSION_OTHER: u32 = 1 << 4;
+
+fn site_permission_labels(permissions: u32) -> Vec<&'static str> {
+    let mut labels = Vec::new();
+    if (permissions & SITE_PERMISSION_CAMERA) != 0 {
+        labels.push("Camera");
+    }
+    if (permissions & SITE_PERMISSION_MICROPHONE) != 0 {
+        labels.push("Microphone");
+    }
+    if (permissions & SITE_PERMISSION_GEOLOCATION) != 0 {
+        labels.push("Location");
+    }
+    if (permissions & SITE_PERMISSION_DESKTOP_CAPTURE) != 0 {
+        labels.push("Screen sharing");
+    }
+    if labels.is_empty() || (permissions & SITE_PERMISSION_OTHER) != 0 {
+        labels.push("Device features");
+    }
+    labels
 }
 
 fn open_external_app_url(url: &str) -> Result<(), String> {

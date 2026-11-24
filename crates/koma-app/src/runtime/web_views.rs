@@ -10,7 +10,7 @@ use koma_ipc::protocol::{
 };
 use makepad_browser_view::{
     AuthRequestEvent, BrowserViews, DownloadRequestEvent, DownloadUpdateEvent, FileDialogEvent,
-    JsDialogEvent, RingShown, ViewId, ViewOp,
+    JsDialogEvent, RingShown, SitePermissionEvent, ViewId, ViewOp,
 };
 use makepad_micro_serde::*;
 use makepad_widgets::*;
@@ -202,6 +202,7 @@ pub struct WebViewRuntime {
     pending_download_updates: Vec<DownloadUpdateEvent>,
     pending_js_dialogs: Vec<(ViewId, JsDialogEvent)>,
     pending_auth_requests: Vec<(ViewId, AuthRequestEvent)>,
+    pending_permission_requests: Vec<(ViewId, SitePermissionEvent)>,
     pending_closed_komas: Vec<KomaId>,
     koma_api_enabled: HashMap<KomaId, bool>,
     koma_api_injected_url: HashMap<KomaId, String>,
@@ -235,6 +236,7 @@ impl WebViewRuntime {
             pending_download_updates: Vec::new(),
             pending_js_dialogs: Vec::new(),
             pending_auth_requests: Vec::new(),
+            pending_permission_requests: Vec::new(),
             pending_closed_komas: Vec::new(),
             koma_api_enabled: HashMap::new(),
             koma_api_injected_url: HashMap::new(),
@@ -597,6 +599,27 @@ impl WebViewRuntime {
                 request_id,
                 username,
                 password,
+            },
+        );
+        self.views.service(cx);
+    }
+
+    pub fn take_permission_requests(&mut self) -> Vec<(ViewId, SitePermissionEvent)> {
+        std::mem::take(&mut self.pending_permission_requests)
+    }
+
+    pub fn resolve_permission_request(
+        &mut self,
+        cx: &mut Cx,
+        view_id: ViewId,
+        request_id: u64,
+        granted: bool,
+    ) {
+        self.views.send(
+            view_id,
+            ViewOp::PermissionResult {
+                request_id,
+                granted,
             },
         );
         self.views.service(cx);
@@ -1027,6 +1050,12 @@ impl WebViewRuntime {
                     .extend(auth_requests.into_iter().map(|req| (id, req)));
                 changed = true;
             }
+            let permission_requests = self.views.take_permission_requests(id);
+            if !permission_requests.is_empty() {
+                self.pending_permission_requests
+                    .extend(permission_requests.into_iter().map(|req| (id, req)));
+                changed = true;
+            }
             if self.views.take_closed(id) {
                 if let Some(koma_id) = self.view_to_koma.get(&id).cloned() {
                     self.pending_closed_komas.push(koma_id);
@@ -1075,6 +1104,7 @@ impl WebViewRuntime {
         self.pending_download_updates.clear();
         self.pending_js_dialogs.clear();
         self.pending_auth_requests.clear();
+        self.pending_permission_requests.clear();
         self.pending_closed_komas.clear();
         self.koma_api_enabled.clear();
         self.koma_api_injected_url.clear();

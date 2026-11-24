@@ -10,6 +10,12 @@
     <string>koma-app</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Koma needs access to your camera for websites that request video capture.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Koma needs access to your microphone for websites that request audio capture.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Koma needs access to your location for websites that request geolocation.</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
