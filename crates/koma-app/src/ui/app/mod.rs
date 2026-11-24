@@ -467,6 +467,39 @@ impl App {
         self.create_web_koma_after(cx, url, label, None)
     }
 
+    pub(super) fn create_web_koma_with_view(
+        &mut self,
+        cx: &mut Cx,
+        view_id: makepad_browser_view::ViewId,
+        url: String,
+    ) -> KomaMeta {
+        let display_url = if url.is_empty() {
+            "about:blank".to_string()
+        } else {
+            url
+        };
+        let label = derive_url_label(&display_url);
+        let (koma, focused_active) = self.state.insert_koma_after(
+            KomaKind::Web,
+            label,
+            Some(display_url.clone()),
+            None,
+            None,
+            None,
+        );
+        self.web_runtime()
+            .borrow_mut()
+            .bind_popup_view(cx, &koma.id, view_id, &display_url);
+        if focused_active {
+            self.state.mode = InputMode::ContentInput;
+        }
+        self.sync_after_mutation(cx, focused_active);
+        if !focused_active {
+            self.show_created_koma_toast(cx, &koma);
+        }
+        koma
+    }
+
     pub(super) fn create_web_koma_after(
         &mut self,
         cx: &mut Cx,
@@ -1409,6 +1442,20 @@ impl AppMain for App {
         for popup_url in popups {
             let _ = self.create_web_koma(cx, popup_url, None);
         }
+        let popup_views = self.web_runtime().borrow_mut().take_popup_views();
+        for (view_id, url) in popup_views {
+            let _ = self.create_web_koma_with_view(cx, view_id, url);
+        }
+        let external_urls = self.web_runtime().borrow_mut().take_external_urls();
+        for external_url in external_urls {
+            if let Err(err) = open_external_app_url(&external_url) {
+                self.show_toast(cx, err);
+            }
+        }
+        let closed_komas = self.web_runtime().borrow_mut().take_closed_komas();
+        for koma_id in closed_komas {
+            let _ = self.close_koma_by_id(cx, &koma_id, false);
+        }
         let url_changes = self.web_runtime().borrow_mut().take_url_changes();
         let mut url_state_changed = false;
         for (koma_id, url) in url_changes {
@@ -1510,4 +1557,28 @@ impl AppMain for App {
 
         self.sync_focus_from_ui(cx);
     }
+}
+
+fn open_external_app_url(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg(url);
+        c
+    };
+    #[cfg(target_os = "linux")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", "", url]);
+        c
+    };
+    cmd.spawn()
+        .map(|_| ())
+        .map_err(|err| format!("Failed to open external URL {url}: {err}"))
 }

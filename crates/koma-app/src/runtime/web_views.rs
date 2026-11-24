@@ -192,6 +192,9 @@ pub struct WebViewRuntime {
     pending_evals: HashMap<u64, PendingEval>,
     pending_script_targets: Vec<PendingScriptTarget>,
     pending_popups: Vec<String>,
+    pending_popup_views: Vec<(ViewId, String)>,
+    pending_external_urls: Vec<String>,
+    pending_closed_komas: Vec<KomaId>,
     koma_api_enabled: HashMap<KomaId, bool>,
     koma_api_injected_url: HashMap<KomaId, String>,
     pending_koma_api: Vec<KomaApiEvent>,
@@ -217,6 +220,9 @@ impl WebViewRuntime {
             pending_evals: HashMap::new(),
             pending_script_targets: Vec::new(),
             pending_popups: Vec::new(),
+            pending_popup_views: Vec::new(),
+            pending_external_urls: Vec::new(),
+            pending_closed_komas: Vec::new(),
             koma_api_enabled: HashMap::new(),
             koma_api_injected_url: HashMap::new(),
             pending_koma_api: Vec::new(),
@@ -482,6 +488,31 @@ impl WebViewRuntime {
 
     pub fn take_popup_urls(&mut self) -> Vec<String> {
         std::mem::take(&mut self.pending_popups)
+    }
+
+    pub fn take_popup_views(&mut self) -> Vec<(ViewId, String)> {
+        std::mem::take(&mut self.pending_popup_views)
+    }
+
+    pub fn take_external_urls(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_external_urls)
+    }
+
+    pub fn take_closed_komas(&mut self) -> Vec<KomaId> {
+        std::mem::take(&mut self.pending_closed_komas)
+    }
+
+    pub fn bind_popup_view(&mut self, cx: &mut Cx, koma_id: &KomaId, view_id: ViewId, url: &str) {
+        self.koma_to_view.insert(koma_id.clone(), view_id);
+        self.view_to_koma.insert(view_id, koma_id.clone());
+        let (size, dpi) = self.last_size.unwrap_or((dvec2(640.0, 680.0), 2.0));
+        self.koma_sizes.insert(koma_id.clone(), (size, dpi));
+        self.koma_hidden.insert(koma_id.clone(), false);
+        self.last_observed_url
+            .insert(koma_id.clone(), url.to_string());
+        self.views.set_size(view_id, size, dpi);
+        self.views.send(view_id, ViewOp::Hidden { on: false });
+        self.views.service(cx);
     }
 
     pub fn take_koma_api_events(&mut self) -> Vec<KomaApiEvent> {
@@ -857,6 +888,22 @@ impl WebViewRuntime {
                 self.pending_popups.extend(popups);
                 changed = true;
             }
+            let popup_views = self.views.take_popup_views(id);
+            if !popup_views.is_empty() {
+                self.pending_popup_views.extend(popup_views);
+                changed = true;
+            }
+            let external_urls = self.views.take_external_urls(id);
+            if !external_urls.is_empty() {
+                self.pending_external_urls.extend(external_urls);
+                changed = true;
+            }
+            if self.views.take_closed(id) {
+                if let Some(koma_id) = self.view_to_koma.get(&id).cloned() {
+                    self.pending_closed_komas.push(koma_id);
+                    changed = true;
+                }
+            }
         }
 
         if !self.pending_script_targets.is_empty() {
@@ -892,6 +939,9 @@ impl WebViewRuntime {
                 .send(IpcResponse::err("Browser host is shutting down"));
         }
         self.pending_popups.clear();
+        self.pending_popup_views.clear();
+        self.pending_external_urls.clear();
+        self.pending_closed_komas.clear();
         self.koma_api_enabled.clear();
         self.koma_api_injected_url.clear();
         self.pending_koma_api.clear();
