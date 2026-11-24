@@ -2,7 +2,7 @@
 
 use koma_app::domain::palette::{candidates, PaletteAction, PaletteItem, MAX_CANDIDATES};
 use koma_core::input::{parse_open_koma_input_with_engine, resolve_web_url_with_engine};
-use koma_core::model::{InputMode, KomaKind, NotificationEntry};
+use koma_core::model::{InputMode, KomaKind, KomaMeta, NotificationEntry};
 use makepad_widgets::*;
 
 use crate::runtime::profiles::{self, Profile};
@@ -33,27 +33,62 @@ impl App {
         self.ui.toaster(cx, ids!(toaster)).show(cx, toast);
     }
 
-    /// Focuses the Koma behind the notification toast `id` and marks it read.
-    pub(super) fn focus_toast_notification(&mut self, cx: &mut Cx, id: LiveId) {
-        let Some(notification_id) = self
+    /// Raises a toast for a background-created Koma whose `Open` action jumps to it.
+    pub(super) fn show_created_koma_toast(&mut self, cx: &mut Cx, koma: &KomaMeta) {
+        let sheet_label = koma
+            .sheet_id
+            .as_ref()
+            .and_then(|sid| self.state.sheets().iter().find(|s| &s.id == sid))
+            .map(|s| s.label.as_str())
+            .filter(|label| !label.is_empty());
+        let title = match sheet_label {
+            Some(label) => format!("Opened {} on {label}", koma.label),
+            None => format!("Opened {}", koma.label),
+        };
+        let toast = Toast::new(LiveId::from_str(koma.id.as_str()), &title).action("Open");
+        self.ui.toaster(cx, ids!(toaster)).show(cx, toast);
+    }
+
+    /// Focuses the Koma behind the notification or created-Koma toast `id`.
+    pub(super) fn focus_toast_target(&mut self, cx: &mut Cx, id: LiveId) {
+        if let Some(notification_id) = self
             .state
             .notifications
             .iter()
             .find(|n| LiveId::from_str(&n.id) == id)
             .map(|n| n.id.clone())
-        else {
-            return;
-        };
-        self.ui.toaster(cx, ids!(toaster)).dismiss(cx, id);
-        match self.state.focus_notification_source(Some(&notification_id)) {
-            Ok(_) => {
-                self.state.mode = InputMode::ContentInput;
-                self.sync_after_mutation(cx, true);
+        {
+            self.ui.toaster(cx, ids!(toaster)).dismiss(cx, id);
+            match self.state.focus_notification_source(Some(&notification_id)) {
+                Ok(_) => {
+                    self.state.mode = InputMode::ContentInput;
+                    self.sync_after_mutation(cx, true);
+                }
+                Err(err) => self.show_toast(cx, err),
             }
-            Err(err) => self.show_toast(cx, err),
+            self.render_notifications_overlay(cx);
+            self.update_status(cx);
+            return;
         }
-        self.render_notifications_overlay(cx);
-        self.update_status(cx);
+        let target = self
+            .state
+            .sheets()
+            .iter()
+            .enumerate()
+            .find_map(|(sheet_idx, sheet)| {
+                sheet
+                    .komas
+                    .iter()
+                    .find(|k| LiveId::from_str(k.id.as_str()) == id)
+                    .map(|k| (sheet_idx, k.id.clone()))
+            });
+        if let Some((sheet_idx, koma_id)) = target {
+            self.ui.toaster(cx, ids!(toaster)).dismiss(cx, id);
+            let _ = self.state.switch_sheet(sheet_idx);
+            self.state.focus_koma_by_id(&koma_id);
+            self.state.mode = InputMode::ContentInput;
+            self.sync_after_mutation(cx, true);
+        }
     }
 
     pub(super) fn render_drawer_overlay(&self, cx: &mut Cx) {

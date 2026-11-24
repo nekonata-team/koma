@@ -515,6 +515,9 @@ impl App {
             self.state.record_recent(input, koma.label.as_str());
         }
         self.sync_after_mutation(cx, focused_active);
+        if !focused_active {
+            self.show_created_koma_toast(cx, &koma);
+        }
         koma
     }
 
@@ -1075,7 +1078,7 @@ impl MatchEvent for App {
             ToastAction::ActionPressed(id) => Some(*id),
             _ => None,
         }) {
-            self.focus_toast_notification(cx, id);
+            self.focus_toast_target(cx, id);
         }
 
         let close_dialog = self.ui.dialog(cx, ids!(close_sheet_dialog));
