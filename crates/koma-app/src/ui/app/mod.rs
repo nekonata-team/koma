@@ -1163,14 +1163,13 @@ impl MatchEvent for App {
                     }
                 }
                 MpTermAction::Exited => {
-                    if let Some(removed) = self
+                    let exited_id = self
                         .ui
                         .widget(cx, ids!(sheet_strip))
                         .borrow::<SheetStrip>()
-                        .and_then(|strip| strip.koma_id_for_widget_uid(widget_action.widget_uid))
-                        .and_then(|id| self.state.remove_koma_by_id(&id))
-                    {
-                        self.finish_remove_koma(cx, removed);
+                        .and_then(|strip| strip.koma_id_for_widget_uid(widget_action.widget_uid));
+                    if let Some(id) = exited_id {
+                        let _ = self.close_koma_by_id(cx, &id, false);
                     }
                 }
                 _ => {}

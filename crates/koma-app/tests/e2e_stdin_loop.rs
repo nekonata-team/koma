@@ -484,49 +484,93 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
     ));
     ipc(IpcCommand::SheetFocus { sheet_index: 1 }).unwrap();
 
+    let reopen_koma = |time_base: f64| {
+        send_batch(
+            &sender,
+            vec![
+                StudioToApp::KeyDown(KeyEvent {
+                    key_code: KeyCode::Comma,
+                    modifiers: KeyModifiers {
+                        control: true,
+                        ..Default::default()
+                    },
+                    is_repeat: false,
+                    time: time_base,
+                }),
+                StudioToApp::KeyDown(KeyEvent {
+                    key_code: KeyCode::KeyU,
+                    modifiers: KeyModifiers::default(),
+                    is_repeat: false,
+                    time: time_base + 0.1,
+                }),
+                StudioToApp::Tick,
+            ],
+        );
+        let reopen_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            send_batch(&sender, vec![StudioToApp::Tick]);
+            while hub.rx.try_recv().is_ok() {}
+            let IpcPayload::KomaFocused(focused) = ipc(IpcCommand::KomaFocused).unwrap() else {
+                panic!("expected focused Koma");
+            };
+            if focused.koma.as_ref().is_some_and(|koma| koma.id == koma_id) {
+                assert_eq!(focused.sheet_id, sheet_id);
+                let saved = koma_app::persistence::load(&profile_dir).unwrap().unwrap();
+                assert_eq!(
+                    saved.koma_by_id(&koma_id.as_str().into()).unwrap().width,
+                    900.0
+                );
+                break;
+            }
+            assert!(
+                Instant::now() < reopen_deadline,
+                "u did not reopen and focus the closed Koma"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    reopen_koma(4.0);
+    // Return from KomaMode to ContentInput before typing `exit` in the reopened terminal.
     send_batch(
         &sender,
         vec![
             StudioToApp::KeyDown(KeyEvent {
-                key_code: KeyCode::Comma,
-                modifiers: KeyModifiers {
-                    control: true,
-                    ..Default::default()
-                },
-                is_repeat: false,
-                time: 4.0,
-            }),
-            StudioToApp::KeyDown(KeyEvent {
-                key_code: KeyCode::KeyU,
+                key_code: KeyCode::Escape,
                 modifiers: KeyModifiers::default(),
                 is_repeat: false,
-                time: 4.1,
+                time: 4.2,
             }),
             StudioToApp::Tick,
         ],
     );
-    let reopen_deadline = Instant::now() + Duration::from_secs(5);
+
+    // Exited terminal (e.g. via C-d / exit) is also pushed to the reopen stack.
+    let exit_input = |text: &str| KomaTextArgs {
+        koma_id: Some(koma_id.clone()),
+        text: text.into(),
+    };
+    ipc(IpcCommand::TerminalSend(exit_input("exit"))).unwrap();
+    ipc(IpcCommand::TerminalPress(exit_input("Enter"))).unwrap();
+    let exit_deadline = Instant::now() + Duration::from_secs(5);
     loop {
         send_batch(&sender, vec![StudioToApp::Tick]);
         while hub.rx.try_recv().is_ok() {}
-        let IpcPayload::KomaFocused(focused) = ipc(IpcCommand::KomaFocused).unwrap() else {
-            panic!("expected focused Koma");
-        };
-        if focused.koma.as_ref().is_some_and(|koma| koma.id == koma_id) {
-            assert_eq!(focused.sheet_id, sheet_id);
-            let saved = koma_app::persistence::load(&profile_dir).unwrap().unwrap();
-            assert_eq!(
-                saved.koma_by_id(&koma_id.as_str().into()).unwrap().width,
-                900.0
-            );
+        if matches!(
+            ipc(IpcCommand::KomaExists {
+                koma_id: koma_id.clone()
+            })
+            .unwrap(),
+            IpcPayload::KomaExists { exists: false, .. }
+        ) {
             break;
         }
         assert!(
-            Instant::now() < reopen_deadline,
-            "u did not reopen and focus the closed Koma"
+            Instant::now() < exit_deadline,
+            "exited terminal Koma was not removed"
         );
         std::thread::sleep(Duration::from_millis(50));
     }
+    reopen_koma(4.5);
 
     if std::env::var_os("KOMA_E2E_WEB_ZOOM").is_some() {
         std::thread::scope(|scope| {
