@@ -3,20 +3,6 @@
 Koma は、ターミナルと Web ページを同じキャンバスに並べて使うアプリです。
 ターミナルや Web ページを表示する各パネルを **Koma** と呼び、それらを **Sheet** にまとめて切り替えられます。
 
-## 起動
-
-ソースから起動するには Rust（rustup）と `just` が必要です。
-このリポジトリのルートで、初回は次のコマンドを実行してください。
-`just setup` はブラウザ用の CEF ランタイムを取得します（約 300 MB）。
-
-```sh
-cargo fetch --locked
-just setup
-just run
-```
-
-次回からは `just run` で起動できます。
-
 ## 基本操作
 
 | 操作 | キー |
@@ -58,11 +44,20 @@ Palette の `> New Profile` で空の Workspace を作り、`> Switch Profile` �
 既定の Profile は `Default` で、Profile ごとのレイアウトとブラウザデータは `~/.local/state/koma/profiles/` に保存されます（保存ルートは `KOMA_STATE_DIR` で変更できます）。
 `> New private workspace` で開いた Workspace は、終了後に復元されません。
 
+### macOS でデフォルトのブラウザにする
+
+Palette の `> Show default browser` で、現在の既定ブラウザを確認できます。
+Koma に変えるには `> Set as default browser` を選び、macOS の確認画面で「Koma に変更」を選びます。
+別のブラウザに戻すには、macOS の「システム設定」→「デスクトップと Dock」→「デフォルトのウェブブラウザ」で選び直します。
+
+他のアプリから開いた Web リンクは、新しい Web Koma に表示されます。
+Koma が起動していなければ Default Profile の復元先 Sheet、起動済みならリンクを受け取ったウィンドウの選択中の Sheet に追加します。
+
 ## 設定
 
-`just koma settings` で `~/.config/koma/config.toml` をエディタで開けます。
+設定を変えるには、`~/.config/koma/config.toml` を編集します。
 設定ファイルの場所は `KOMA_CONFIG` で変更できます。
-保存後、Palette の `> Reload config` または `just koma settings reload` で読み直せます。
+保存後、Palette の `> Reload config` で読み直せます。
 
 ```toml
 [layout]
@@ -93,13 +88,13 @@ Koma Mode の `y` でその端末を複製すると、使用中の名前を避�
 
 ## CLI と自動化
 
-アプリの起動中は、`just koma profile list` で Profile を一覧表示し、`just koma profile open work` で既存の `work` を開けます。
-CLI を PATH に置いている場合は `koma` で直接実行できます。
-コマンドの一覧は `just koma --help`、個別の使い方は `just koma web script --help` のように確認できます。
+CLI を PATH に置いている場合は、アプリの起動中に `koma` コマンドを使えます。
+`koma profile list` で Profile を一覧表示し、`koma profile open work` で既存の `work` を開けます。
+コマンドの一覧は `koma --help`、個別の使い方は `koma web script --help` のように確認できます。
 
 ### Web Koma のスクリプト実行
 
-`just koma web script --koma koma-3 task.mjs` は、開いている Web Koma で Node.js のモジュールを実行します。
+`koma web script --koma koma-3 task.mjs` は、開いている Web Koma で Node.js のモジュールを実行します。
 Node.js 20 以上と、スクリプトのプロジェクトに `playwright-core` 1.60 以上が必要です。
 Playwright 用ブラウザの追加インストールは不要です。
 

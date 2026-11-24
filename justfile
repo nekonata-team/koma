@@ -33,9 +33,25 @@ test *args:
     cargo nextest run --workspace --offline "$@"
 
 # 起動する
+[macos]
+run: bundle-macos
+    open "${CARGO_TARGET_DIR:-target}/debug/Koma.app"
+
+# 起動する
+[linux]
+[windows]
 run:
     cargo build -p makepad-app-browser-host
     cargo run -p koma-app
+
+# macOS の開発用 Koma.app を作成する（CEF は just setup で取得）
+[macos]
+bundle-macos:
+    cargo build --locked -p koma-app -p makepad-app-browser-host
+    bin="${CARGO_TARGET_DIR:-target}/debug"; contents="$bin/Koma.app/Contents"; \
+        mkdir -p "$contents/MacOS" && \
+        install -CS -m 644 crates/koma-app/macos/Info.plist "$contents/" && \
+        install -CS -m 755 "$bin/koma-app" "$bin/makepad-app-browser-host" "$contents/MacOS/"
 
 # koma CLI を実行する
 [positional-arguments]

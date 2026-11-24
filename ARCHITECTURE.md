@@ -1,6 +1,6 @@
 # Koma のアーキテクチャ
 
-用語は [GLOSSARY.md](GLOSSARY.md)、設計判断は [ADR](docs/adr/) を参照。
+用語は [GLOSSARY.md](GLOSSARY.md)、設計判断は [ADR](docs/adr/)、ソースからの起動手順は [開発環境](docs/development.md) を参照。
 
 ## Cargo の依存境界
 

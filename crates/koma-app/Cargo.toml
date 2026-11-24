@@ -12,6 +12,9 @@ makepad-app-terminal = { git = "https://github.com/makepad/makepad", branch = "m
 makepad-micro-serde = { git = "https://github.com/makepad/makepad", branch = "main" }
 toml = "1.2.1"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+makepad-apple-sys = { git = "https://github.com/makepad/makepad", branch = "main" }
+
 [dev-dependencies]
 makepad-app-host = { git = "https://github.com/makepad/makepad", branch = "main" }
 makepad-studio-protocol = { git = "https://github.com/makepad/makepad", branch = "main" }

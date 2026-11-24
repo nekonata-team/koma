@@ -25,7 +25,7 @@ pub struct PaletteItem {
     pub action: PaletteAction,
 }
 
-const COMMANDS: [(&str, RouteDecision); 22] = [
+const COMMANDS: &[(&str, RouteDecision)] = &[
     ("Toggle overview", RouteDecision::ToggleOverview),
     ("New terminal", RouteDecision::CreateTerminal),
     ("Duplicate koma", RouteDecision::DuplicateFocusedKoma),
@@ -38,6 +38,10 @@ const COMMANDS: [(&str, RouteDecision); 22] = [
     ("New private workspace", RouteDecision::OpenPrivateWorkspace),
     ("New Profile", RouteDecision::NewProfile),
     ("Switch Profile", RouteDecision::SwitchProfile),
+    #[cfg(target_os = "macos")]
+    ("Show default browser", RouteDecision::ShowDefaultBrowser),
+    #[cfg(target_os = "macos")]
+    ("Set as default browser", RouteDecision::SetDefaultBrowser),
     ("Open DevTools", RouteDecision::OpenDevTools),
     ("Close koma", RouteDecision::CloseFocusedKoma),
     ("Reopen closed Koma", RouteDecision::ReopenClosedKoma),
@@ -185,6 +189,16 @@ mod tests {
             items[0].action,
             PaletteAction::Run(RouteDecision::OpenPrivateWorkspace)
         );
+    }
+
+    #[test]
+    fn default_browser_commands_are_only_offered_on_macos() {
+        let items = candidates(
+            "> default browser",
+            &WorkspaceState::poc_default(),
+            &Config::default(),
+        );
+        assert_eq!(items.len(), if cfg!(target_os = "macos") { 2 } else { 0 });
     }
 
     #[test]

@@ -183,6 +183,7 @@ dependencies = [
  "koma-ipc",
  "makepad-app-host",
  "makepad-app-terminal",
+ "makepad-apple-sys",
  "makepad-browser-view",
  "makepad-micro-serde",
  "makepad-platform",

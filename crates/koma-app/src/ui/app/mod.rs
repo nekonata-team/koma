@@ -21,6 +21,10 @@ use crate::runtime::web_views::{KomaApiEvent, WebViewRuntime};
 use crate::ui::sheet_strip::{self, SheetStrip, SheetStripAction};
 use crate::ui::web_koma::{self, WebKomaAction};
 
+#[cfg(target_os = "macos")]
+mod default_browser;
+#[cfg(target_os = "macos")]
+mod external_urls;
 mod ipc_dispatch;
 mod lifecycle;
 mod overlays;
@@ -1038,6 +1042,10 @@ impl App {
                     self.ui.redraw(cx);
                 }
             }
+            #[cfg(target_os = "macos")]
+            RouteDecision::ShowDefaultBrowser => default_browser::show(),
+            #[cfg(target_os = "macos")]
+            RouteDecision::SetDefaultBrowser => default_browser::set(),
             RouteDecision::Forward | RouteDecision::Consume => {}
         }
     }
@@ -1087,6 +1095,11 @@ impl MatchEvent for App {
         for action in actions {
             if let Some(error) = action.downcast_ref::<lifecycle::ProfileOpenError>() {
                 self.show_toast(cx, error.0.clone());
+                continue;
+            }
+            #[cfg(target_os = "macos")]
+            if let Some(status) = action.downcast_ref::<default_browser::DefaultBrowserStatus>() {
+                self.show_toast(cx, status.0.clone());
                 continue;
             }
             let Some(widget_action) = action.as_widget_action() else {
@@ -1248,6 +1261,11 @@ impl AppMain for App {
         self.init_runtime(cx);
 
         self.drain_ipc(cx);
+
+        #[cfg(target_os = "macos")]
+        if let Event::AppOpen(open) = event {
+            self.open_external_urls(cx, open);
+        }
 
         match event {
             Event::WindowLostFocus(_) => self.handled_keys.clear(),

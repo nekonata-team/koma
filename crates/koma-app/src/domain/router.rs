@@ -101,6 +101,10 @@ pub enum RouteDecision {
     OpenPrivateWorkspace,
     NewProfile,
     SwitchProfile,
+    #[cfg(target_os = "macos")]
+    ShowDefaultBrowser,
+    #[cfg(target_os = "macos")]
+    SetDefaultBrowser,
     OpenDevTools,
     EditFocusedUrl,
     RenameFocusedKoma,
