@@ -12,7 +12,6 @@ use crate::runtime::{
     profiles::{self, Profile, DEFAULT_PROFILE},
     web_views::WebViewRuntime,
 };
-use crate::ui::sheet_strip::SheetStrip;
 
 use super::App;
 
@@ -206,17 +205,13 @@ impl App {
         if startup_err.is_none() {
             startup_err = diagnostics.into_iter().next();
         }
-        if let Some(mut strip) = self
-            .ui
-            .widget(cx, ids!(sheet_strip))
-            .borrow_mut::<SheetStrip>()
-        {
+        self.with_strip_mut(cx, |strip, _| {
             strip.set_shared_web_runtime(Rc::clone(&web_runtime));
             strip.set_terminal_settings(terminal_settings);
             strip.set_terminal_shell(self.config.terminal.shell.clone());
             strip.set_center_focused(self.config.center_focused);
             strip.set_koma_gap(self.config.koma_gap);
-        }
+        });
         {
             let mut rt = web_runtime.borrow_mut();
             for koma in self
@@ -251,13 +246,7 @@ impl App {
         set_base_theme(cx, base_theme);
         set_app_theme_tokens(cx, self.config.theme.app_theme_tokens_script());
         cx.request_style_reload();
-        if let Some(mut strip) = self
-            .ui
-            .widget(cx, ids!(sheet_strip))
-            .borrow_mut::<SheetStrip>()
-        {
-            strip.set_theme(is_dark);
-        }
+        self.with_strip_mut(cx, |strip, _| strip.set_theme(is_dark));
         self.ui.redraw(cx);
     }
 
@@ -273,16 +262,12 @@ impl App {
         for diagnostic in &diagnostics {
             eprintln!("[koma:ghostty] {diagnostic}");
         }
-        if let Some(mut strip) = self
-            .ui
-            .widget(cx, ids!(sheet_strip))
-            .borrow_mut::<SheetStrip>()
-        {
+        self.with_strip_mut(cx, |strip, _| {
             strip.set_terminal_settings(terminal_settings);
             strip.set_terminal_shell(self.config.terminal.shell.clone());
             strip.set_center_focused(self.config.center_focused);
             strip.set_koma_gap(self.config.koma_gap);
-        }
+        });
         self.apply_theme(cx);
         if let Some(first_err) = diagnostics.into_iter().next() {
             return Err(first_err);

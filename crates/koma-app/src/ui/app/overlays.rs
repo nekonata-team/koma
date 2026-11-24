@@ -8,7 +8,6 @@ use makepad_widgets::*;
 use crate::runtime::profiles::{self, Profile};
 
 use super::{App, PromptMode};
-use crate::ui::sheet_strip::SheetStrip;
 
 impl App {
     /// Says `msg` in the single result toast, replacing the previous one in place.
@@ -324,10 +323,9 @@ impl App {
             }
         } else if self.state.mode == InputMode::ContentInput {
             let focused_id = self.state.focused_koma().map(|b| b.id.clone());
-            let strip_widget = self.ui.widget(cx, ids!(sheet_strip));
-            let ready = strip_widget
-                .borrow_mut::<SheetStrip>()
-                .is_none_or(|mut strip| strip.focus_koma(cx, focused_id.as_ref()));
+            let ready = self
+                .with_strip_mut(cx, |strip, cx| strip.focus_koma(cx, focused_id.as_ref()))
+                .unwrap_or(true);
             if ready {
                 self.pending_focus_sync = false;
             }
