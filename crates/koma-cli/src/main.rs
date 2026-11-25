@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use clap::Parser;
-use koma_ipc::protocol::{IpcCommand, IpcPayload, KomaSummary};
+use koma_ipc::protocol::{IpcCommand, IpcPayload, KomaSummary, WorkspaceCommand};
 use koma_ipc::transport::{resolve_socket_path, send_request};
 use makepad_micro_serde::SerJson;
 
@@ -93,7 +93,7 @@ fn run(args: Args) -> Result<(), String> {
         .web_script()
         .map(|(path, timeout)| (path.to_path_buf(), timeout));
     let req = args.into_request();
-    let is_health = matches!(req.command, IpcCommand::Health);
+    let is_health = matches!(req.command, IpcCommand::Workspace(WorkspaceCommand::Health));
     let resp = send_request(&sock, &req)?;
     if let Some((file, timeout)) = script {
         return match resp.into_result()? {

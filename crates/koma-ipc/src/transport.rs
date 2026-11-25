@@ -97,7 +97,7 @@ pub fn send_request_via_port_file(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use crate::protocol::IpcCommand;
+    use crate::protocol::{IpcCommand, WorkspaceCommand};
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixListener;
 
@@ -113,14 +113,17 @@ mod tests {
             let mut reader = BufReader::new(stream.try_clone().expect("clone"));
             reader.read_line(&mut line).expect("read");
             let req = IpcRequest::deserialize_json(line.trim()).expect("parse req");
-            assert_eq!(req.command, IpcCommand::Health);
+            assert_eq!(req.command, IpcCommand::Workspace(WorkspaceCommand::Health));
             let resp = IpcResponse::ok();
             let out = format!("{}\n", resp.serialize_json());
             stream.write_all(out.as_bytes()).expect("write");
         });
 
-        let resp =
-            send_request(sock.to_str().unwrap(), &IpcRequest::new(IpcCommand::Health)).unwrap();
+        let resp = send_request(
+            sock.to_str().unwrap(),
+            &IpcRequest::new(IpcCommand::Workspace(WorkspaceCommand::Health)),
+        )
+        .unwrap();
         assert!(resp.is_ok());
         handle.join().unwrap();
         let _ = std::fs::remove_file(&sock);
@@ -139,14 +142,14 @@ mod tests {
             let mut reader = BufReader::new(stream.try_clone().expect("clone"));
             reader.read_line(&mut line).expect("read");
             let req = IpcRequest::deserialize_json(line.trim()).expect("parse req");
-            assert_eq!(req.command, IpcCommand::Health);
+            assert_eq!(req.command, IpcCommand::Workspace(WorkspaceCommand::Health));
             let out = format!("{}\n", IpcResponse::ok().serialize_json());
             stream.write_all(out.as_bytes()).expect("write");
         });
 
         let resp = send_request_via_port_file(
             port_file.to_str().unwrap(),
-            &IpcRequest::new(IpcCommand::Health),
+            &IpcRequest::new(IpcCommand::Workspace(WorkspaceCommand::Health)),
         )
         .unwrap();
         assert!(resp.is_ok());

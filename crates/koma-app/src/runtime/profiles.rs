@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use koma_app::persistence;
-use koma_ipc::protocol::{IpcCommand, IpcRequest};
+use koma_ipc::protocol::{IpcCommand, IpcRequest, WorkspaceCommand};
 use koma_ipc::transport::send_request;
 
 pub const DEFAULT_PROFILE: &str = "default";
@@ -115,9 +115,9 @@ impl Profile {
             .map_err(|e| format!("Profile {} has no ready IPC endpoint: {e}", self.id))?;
         send_request(
             &socket,
-            &IpcRequest::new(IpcCommand::ProfileActivate {
+            &IpcRequest::new(IpcCommand::Workspace(WorkspaceCommand::ProfileActivate {
                 id: self.id.clone(),
-            }),
+            })),
         )?
         .into_result()?;
         Ok(())

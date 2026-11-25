@@ -8,11 +8,12 @@ use koma_core::input::{
 };
 use koma_core::model::{KomaId, KomaKind, KomaMeta, SheetId, SheetState};
 use koma_ipc::protocol::{
-    DrawerItemSummary, DrawerKeepArgs, IpcCommand, IpcPayload, IpcResponse, KomaFocusedData,
-    KomaPlacement, KomaSummary, KomaTarget, KomaTextArgs, NotificationSendArgs,
-    NotificationSummary, PresetSummary, SheetListEntry, SheetSummary, TerminalNewArgs,
-    TerminalTextArgs, WebClickArgs, WebEvalArgs, WebFillArgs, WebKomaData, WebReadArgs,
-    WebReloadArgs,
+    DrawerCommand, DrawerItemSummary, DrawerKeepArgs, IpcCommand, IpcPayload, IpcResponse,
+    KomaCommand, KomaFocusedData, KomaPlacement, KomaSummary, KomaTarget, KomaTextArgs,
+    NotificationCommand, NotificationSendArgs, NotificationSummary, PresetSummary, SheetCommand,
+    SheetListEntry, SheetSummary, TerminalCommand, TerminalNewArgs, TerminalTextArgs, WebClickArgs,
+    WebCommand, WebEvalArgs, WebFillArgs, WebKomaData, WebReadArgs, WebReloadArgs,
+    WorkspaceCommand,
 };
 use makepad_app_terminal::widget::MpTerm;
 use makepad_widgets::*;
@@ -77,82 +78,28 @@ impl App {
         let caller = req.caller_koma_id.map(KomaId::from);
         let caller = caller.as_ref();
         match req.command {
-            cmd @ (IpcCommand::KomaList(_)
-            | IpcCommand::KomaFocused
-            | IpcCommand::KomaExists { .. }
-            | IpcCommand::KomaFocus { .. }
-            | IpcCommand::KomaMove { .. }
-            | IpcCommand::KomaResize { .. }
-            | IpcCommand::KomaClose { .. }) => {
-                send_result(reply, self.dispatch_koma(cx, cmd, caller));
-            }
-            cmd @ (IpcCommand::SheetClose
-            | IpcCommand::SheetList
-            | IpcCommand::SheetNew { .. }
-            | IpcCommand::SheetFocus { .. }
-            | IpcCommand::PresetList
-            | IpcCommand::PresetSave { .. }
-            | IpcCommand::PresetApply { .. }
-            | IpcCommand::Overview
-            | IpcCommand::OverviewToggle) => {
-                send_result(reply, self.dispatch_sheet(cx, cmd));
-            }
-            cmd @ (IpcCommand::WebDevtools
-            | IpcCommand::WebNew { .. }
-            | IpcCommand::WebReload(_)
-            | IpcCommand::WebRead(_)
-            | IpcCommand::WebText(_)
-            | IpcCommand::WebClick(_)
-            | IpcCommand::WebFill(_)
-            | IpcCommand::WebUrl(_)
-            | IpcCommand::WebEval(_)
-            | IpcCommand::WebScriptTarget(_)
-            | IpcCommand::WebSnapshot(_)
-            | IpcCommand::WebType(_)
-            | IpcCommand::BenchSpawnWebs { .. }) => {
-                self.dispatch_web(cx, cmd, caller, reply);
-            }
-            cmd @ (IpcCommand::TerminalNew(_)
-            | IpcCommand::TerminalRun(_)
-            | IpcCommand::TerminalPress(_)
-            | IpcCommand::TerminalKill(_)
-            | IpcCommand::TerminalText(_)
-            | IpcCommand::TerminalSend(_)) => {
+            IpcCommand::Koma(cmd) => send_result(reply, self.dispatch_koma(cx, cmd, caller)),
+            IpcCommand::Sheet(cmd) => send_result(reply, self.dispatch_sheet(cx, cmd)),
+            IpcCommand::Web(cmd) => self.dispatch_web(cx, cmd, caller, reply),
+            IpcCommand::Terminal(cmd) => {
                 send_result(reply, self.dispatch_terminal(cx, cmd, caller));
             }
-            cmd @ (IpcCommand::DrawerList
-            | IpcCommand::DrawerKeep(_)
-            | IpcCommand::DrawerPlace(_)
-            | IpcCommand::DrawerDiscard(_)
-            | IpcCommand::DrawerRestore) => {
-                send_result(reply, self.dispatch_drawer(cx, cmd));
-            }
-            cmd @ (IpcCommand::NotificationSend(_)
-            | IpcCommand::NotificationList { .. }
-            | IpcCommand::NotificationRead { .. }
-            | IpcCommand::NotificationUnread { .. }) => {
+            IpcCommand::Drawer(cmd) => send_result(reply, self.dispatch_drawer(cx, cmd)),
+            IpcCommand::Notification(cmd) => {
                 send_result(reply, self.dispatch_notification(cx, cmd, caller));
             }
-            cmd @ (IpcCommand::Health
-            | IpcCommand::ProfileList
-            | IpcCommand::ProfileOpen { .. }
-            | IpcCommand::ProfileNew { .. }
-            | IpcCommand::ProfileActivate { .. }
-            | IpcCommand::WorkspacePrivate
-            | IpcCommand::SettingsReload) => {
-                self.dispatch_workspace(cx, cmd, reply);
-            }
+            IpcCommand::Workspace(cmd) => self.dispatch_workspace(cx, cmd, reply),
         }
     }
 
     fn dispatch_koma(
         &mut self,
         cx: &mut Cx,
-        cmd: IpcCommand,
+        cmd: KomaCommand,
         caller: Option<&KomaId>,
     ) -> Result<IpcPayload, String> {
         match cmd {
-            IpcCommand::KomaList(args) => {
+            KomaCommand::List(args) => {
                 let sheet = match args.sheet_id.as_deref().map(SheetId::from) {
                     Some(id) => self.state.sheets().iter().find(|sheet| sheet.id == id),
                     None => Some(
@@ -179,7 +126,7 @@ impl App {
                     komas,
                 })
             }
-            IpcCommand::KomaFocused => {
+            KomaCommand::Focused => {
                 let sheet = self.state.current_sheet();
                 let koma = sheet
                     .focused_koma()
@@ -189,7 +136,7 @@ impl App {
                     koma,
                 }))
             }
-            IpcCommand::KomaExists { koma_id } => {
+            KomaCommand::Exists { koma_id } => {
                 let koma_id = KomaId::from(koma_id);
                 let exists = self.state.koma_by_id(&koma_id).is_some();
                 Ok(IpcPayload::KomaExists {
@@ -197,7 +144,7 @@ impl App {
                     exists,
                 })
             }
-            IpcCommand::KomaFocus { koma_id } => {
+            KomaCommand::Focus { koma_id } => {
                 let koma_id = KomaId::from(koma_id);
                 if self.state.koma_by_id(&koma_id).is_none() {
                     return Err(format!("Koma not found: {koma_id}"));
@@ -212,14 +159,14 @@ impl App {
                     koma_id: koma_id.into_string(),
                 })
             }
-            IpcCommand::KomaMove { koma_id, placement } => {
+            KomaCommand::Move { koma_id, placement } => {
                 let koma_id = KomaId::from(koma_id);
                 self.move_koma_from_ipc(cx, &koma_id, &placement)?;
                 Ok(IpcPayload::KomaId {
                     koma_id: koma_id.into_string(),
                 })
             }
-            IpcCommand::KomaResize { koma_id, width } => {
+            KomaCommand::Resize { koma_id, width } => {
                 let koma_id = KomaId::from(koma_id);
                 let width = self.state.set_koma_width(&koma_id, width)?;
                 self.sync_after_mutation(cx, false);
@@ -228,24 +175,23 @@ impl App {
                     width,
                 })
             }
-            IpcCommand::KomaClose { koma_id } => {
+            KomaCommand::Close { koma_id } => {
                 let koma_id = KomaId::from(koma_id);
                 self.close_koma_by_id(cx, &koma_id, false)?;
                 Ok(IpcPayload::KomaId {
                     koma_id: koma_id.into_string(),
                 })
             }
-            _ => unreachable!(),
         }
     }
 
-    fn dispatch_sheet(&mut self, cx: &mut Cx, cmd: IpcCommand) -> Result<IpcPayload, String> {
+    fn dispatch_sheet(&mut self, cx: &mut Cx, cmd: SheetCommand) -> Result<IpcPayload, String> {
         match cmd {
-            IpcCommand::SheetClose => {
+            SheetCommand::Close => {
                 self.close_current_sheet(cx)?;
                 Ok(IpcPayload::Ack)
             }
-            IpcCommand::SheetList => {
+            SheetCommand::List => {
                 let sheets = self
                     .state
                     .sheets()
@@ -260,13 +206,13 @@ impl App {
                     .collect();
                 Ok(IpcPayload::SheetList { sheets })
             }
-            IpcCommand::SheetNew { label, focus } => {
+            SheetCommand::New { label, focus } => {
                 let sheet = self.state.add_named_sheet(&label, focus)?;
                 let sheet_id = sheet.id.to_string();
                 self.sync_after_mutation(cx, focus);
                 Ok(IpcPayload::SheetId { sheet_id })
             }
-            IpcCommand::SheetFocus { sheet_index } => {
+            SheetCommand::Focus { sheet_index } => {
                 let idx = sheet_index
                     .checked_sub(1)
                     .filter(|&i| i < self.state.sheets().len())
@@ -279,7 +225,7 @@ impl App {
                 self.switch_sheet(cx, idx);
                 Ok(IpcPayload::Ack)
             }
-            IpcCommand::PresetList => {
+            SheetCommand::PresetList => {
                 let presets = available_sheet_presets(
                     &self.state.personal_presets,
                     &self.config.sheet_presets,
@@ -292,19 +238,19 @@ impl App {
                 .collect();
                 Ok(IpcPayload::PresetList { presets })
             }
-            IpcCommand::PresetSave { name } => {
+            SheetCommand::PresetSave { name } => {
                 let preset = self.state.save_current_sheet_as_preset(&name)?;
                 self.save_state(cx);
                 self.show_toast(cx, format!("Saved preset: {}", preset.name));
                 Ok(IpcPayload::PresetSaved { name: preset.name })
             }
-            IpcCommand::PresetApply { name } => {
+            SheetCommand::PresetApply { name } => {
                 let idx = self.apply_sheet_preset_by_name(cx, &name)?;
                 Ok(IpcPayload::PresetApplied {
                     sheet_index: idx + 1,
                 })
             }
-            IpcCommand::Overview => {
+            SheetCommand::Overview => {
                 let rt = self.web_runtime().borrow();
                 let sheets = self
                     .state
@@ -324,23 +270,22 @@ impl App {
                     .collect();
                 Ok(IpcPayload::Overview { sheets })
             }
-            IpcCommand::OverviewToggle => {
+            SheetCommand::OverviewToggle => {
                 self.toggle_overview(cx);
                 Ok(IpcPayload::Ack)
             }
-            _ => unreachable!(),
         }
     }
 
     fn dispatch_web(
         &mut self,
         cx: &mut Cx,
-        cmd: IpcCommand,
+        cmd: WebCommand,
         caller: Option<&KomaId>,
         reply: IpcReply,
     ) {
         match cmd {
-            IpcCommand::WebDevtools => {
+            WebCommand::Devtools => {
                 send_result(
                     reply,
                     self.open_devtools_for_focused_web(cx).map(|koma| {
@@ -351,7 +296,7 @@ impl App {
                     }),
                 );
             }
-            IpcCommand::WebNew {
+            WebCommand::New {
                 url: raw_url,
                 koma_api,
             } => {
@@ -380,7 +325,7 @@ impl App {
                 })();
                 send_result(reply, result);
             }
-            IpcCommand::WebReload(WebReloadArgs { koma_id, koma_api }) => {
+            WebCommand::Reload(WebReloadArgs { koma_id, koma_api }) => {
                 let result = (|| {
                     let koma_id = self.resolve_web_koma(koma_id, caller)?;
                     if let Some(enable) = koma_api {
@@ -412,22 +357,22 @@ impl App {
                 })();
                 send_result(reply, result);
             }
-            IpcCommand::WebRead(WebReadArgs { koma_id, within }) => {
+            WebCommand::Read(WebReadArgs { koma_id, within }) => {
                 self.with_resolved_web_koma(koma_id, caller, reply, |rt, id, reply| {
                     rt.read_for_ipc(cx, &id, within.as_deref(), reply);
                 });
             }
-            IpcCommand::WebText(KomaTarget { koma_id }) => {
+            WebCommand::Text(KomaTarget { koma_id }) => {
                 self.with_resolved_web_koma(koma_id, caller, reply, |rt, id, reply| {
                     rt.text_for_ipc(cx, &id, reply);
                 });
             }
-            IpcCommand::WebClick(WebClickArgs { koma_id, selector }) => {
+            WebCommand::Click(WebClickArgs { koma_id, selector }) => {
                 self.with_resolved_web_koma(koma_id, caller, reply, |rt, id, reply| {
                     rt.click_for_ipc(cx, &id, &selector, reply);
                 });
             }
-            IpcCommand::WebFill(WebFillArgs {
+            WebCommand::Fill(WebFillArgs {
                 koma_id,
                 selector,
                 text,
@@ -436,7 +381,7 @@ impl App {
                     rt.fill_for_ipc(cx, &id, &selector, &text, reply);
                 });
             }
-            IpcCommand::WebUrl(KomaTarget { koma_id }) => {
+            WebCommand::Url(KomaTarget { koma_id }) => {
                 let result = self.resolve_web_koma(koma_id, caller).map(|koma_id| {
                     let (url, title) = self
                         .web_runtime()
@@ -458,22 +403,22 @@ impl App {
                 });
                 send_result(reply, result);
             }
-            IpcCommand::WebEval(WebEvalArgs { koma_id, script }) => {
+            WebCommand::Eval(WebEvalArgs { koma_id, script }) => {
                 self.with_resolved_web_koma(koma_id, caller, reply, |rt, id, reply| {
                     rt.eval_for_ipc(cx, &id, &script, reply);
                 });
             }
-            IpcCommand::WebScriptTarget(KomaTarget { koma_id }) => {
+            WebCommand::ScriptTarget(KomaTarget { koma_id }) => {
                 self.with_resolved_web_koma(koma_id, caller, reply, |rt, id, reply| {
                     rt.script_target_for_ipc(cx, id, reply);
                 });
             }
-            IpcCommand::WebSnapshot(KomaTarget { koma_id }) => {
+            WebCommand::Snapshot(KomaTarget { koma_id }) => {
                 self.with_resolved_web_koma(koma_id, caller, reply, |rt, id, reply| {
                     rt.snapshot_for_ipc(cx, &id, reply);
                 });
             }
-            IpcCommand::WebType(KomaTextArgs { koma_id, text }) => {
+            WebCommand::Type(KomaTextArgs { koma_id, text }) => {
                 let result = self.resolve_web_koma(koma_id, caller).and_then(|koma_id| {
                     self.web_runtime()
                         .borrow_mut()
@@ -484,7 +429,7 @@ impl App {
                 });
                 send_result(reply, result);
             }
-            IpcCommand::BenchSpawnWebs { count } => {
+            WebCommand::BenchSpawnWebs { count } => {
                 let mut rt = self.web_runtime().borrow_mut();
                 let mut total = rt.view_count();
                 let result = (|| {
@@ -501,18 +446,17 @@ impl App {
                 })();
                 send_result(reply, result);
             }
-            _ => unreachable!(),
         }
     }
 
     fn dispatch_terminal(
         &mut self,
         cx: &mut Cx,
-        cmd: IpcCommand,
+        cmd: TerminalCommand,
         caller: Option<&KomaId>,
     ) -> Result<IpcPayload, String> {
         match cmd {
-            IpcCommand::TerminalNew(TerminalNewArgs { cwd, run }) => {
+            TerminalCommand::New(TerminalNewArgs { cwd, run }) => {
                 if run
                     .as_deref()
                     .is_some_and(|command| command.trim().is_empty())
@@ -538,18 +482,18 @@ impl App {
                     koma_id: koma.id.into_string(),
                 })
             }
-            IpcCommand::TerminalRun(args) => {
+            TerminalCommand::Run(args) => {
                 self.terminal_input(cx, args, caller, MpTerm::run_command)
             }
-            IpcCommand::TerminalPress(args) => {
+            TerminalCommand::Press(args) => {
                 self.terminal_input(cx, args, caller, MpTerm::press_key)
             }
-            IpcCommand::TerminalKill(args) => {
+            TerminalCommand::Kill(args) => {
                 self.terminal_input(cx, args, caller, |term, _, signal| {
                     term.signal_foreground(signal)
                 })
             }
-            IpcCommand::TerminalText(TerminalTextArgs { koma_id, lines }) => {
+            TerminalCommand::Text(TerminalTextArgs { koma_id, lines }) => {
                 let koma_id = self
                     .state
                     .resolve_koma(
@@ -569,7 +513,7 @@ impl App {
                     text: trim_terminal_rows(rows, lines),
                 })
             }
-            IpcCommand::TerminalSend(KomaTextArgs { koma_id, text }) => {
+            TerminalCommand::Send(KomaTextArgs { koma_id, text }) => {
                 let koma_id = self
                     .state
                     .resolve_koma(
@@ -589,13 +533,12 @@ impl App {
                     koma_id: koma_id.into_string(),
                 })
             }
-            _ => unreachable!(),
         }
     }
 
-    fn dispatch_drawer(&mut self, cx: &mut Cx, cmd: IpcCommand) -> Result<IpcPayload, String> {
+    fn dispatch_drawer(&mut self, cx: &mut Cx, cmd: DrawerCommand) -> Result<IpcPayload, String> {
         match cmd {
-            IpcCommand::DrawerList => {
+            DrawerCommand::List => {
                 let items = self
                     .state
                     .drawer
@@ -610,7 +553,7 @@ impl App {
                     .collect();
                 Ok(IpcPayload::DrawerList { items })
             }
-            IpcCommand::DrawerKeep(DrawerKeepArgs {
+            DrawerCommand::Keep(DrawerKeepArgs {
                 input,
                 title,
                 koma_api,
@@ -660,36 +603,35 @@ impl App {
                     }
                 }
             }
-            IpcCommand::DrawerPlace(KomaTarget { koma_id }) => {
+            DrawerCommand::Place(KomaTarget { koma_id }) => {
                 let koma = self.place_drawer_item(cx, koma_id.map(KomaId::from).as_ref())?;
                 Ok(IpcPayload::KomaId {
                     koma_id: koma.id.into_string(),
                 })
             }
-            IpcCommand::DrawerDiscard(KomaTarget { koma_id }) => {
+            DrawerCommand::Discard(KomaTarget { koma_id }) => {
                 let item = self.discard_drawer_item(cx, koma_id.map(KomaId::from).as_ref())?;
                 Ok(IpcPayload::KomaId {
                     koma_id: item.id.into_string(),
                 })
             }
-            IpcCommand::DrawerRestore => {
+            DrawerCommand::Restore => {
                 let item = self.restore_discarded_drawer_item(cx)?;
                 Ok(IpcPayload::KomaId {
                     koma_id: item.id.into_string(),
                 })
             }
-            _ => unreachable!(),
         }
     }
 
     fn dispatch_notification(
         &mut self,
         cx: &mut Cx,
-        cmd: IpcCommand,
+        cmd: NotificationCommand,
         caller: Option<&KomaId>,
     ) -> Result<IpcPayload, String> {
         match cmd {
-            IpcCommand::NotificationSend(NotificationSendArgs {
+            NotificationCommand::Send(NotificationSendArgs {
                 koma_id,
                 title,
                 body,
@@ -709,7 +651,7 @@ impl App {
                     notification_id: entry.id,
                 })
             }
-            IpcCommand::NotificationList { unread_only } => {
+            NotificationCommand::List { unread_only } => {
                 let notifications = self
                     .state
                     .notifications
@@ -725,18 +667,17 @@ impl App {
                     .collect();
                 Ok(IpcPayload::NotificationList { notifications })
             }
-            IpcCommand::NotificationRead { id } => self.mark_notification_from_ipc(cx, &id, false),
-            IpcCommand::NotificationUnread { id } => self.mark_notification_from_ipc(cx, &id, true),
-            _ => unreachable!(),
+            NotificationCommand::Read { id } => self.mark_notification_from_ipc(cx, &id, false),
+            NotificationCommand::Unread { id } => self.mark_notification_from_ipc(cx, &id, true),
         }
     }
 
-    fn dispatch_workspace(&mut self, cx: &mut Cx, cmd: IpcCommand, reply: IpcReply) {
+    fn dispatch_workspace(&mut self, cx: &mut Cx, cmd: WorkspaceCommand, reply: IpcReply) {
         match cmd {
-            IpcCommand::Health => {
+            WorkspaceCommand::Health => {
                 let _ = reply.send(IpcResponse::ok());
             }
-            IpcCommand::ProfileList => {
+            WorkspaceCommand::ProfileList => {
                 send_result(
                     reply,
                     profiles::root()
@@ -744,17 +685,17 @@ impl App {
                         .map(|profiles| IpcPayload::ProfileList { profiles }),
                 );
             }
-            IpcCommand::ProfileOpen { id } => {
+            WorkspaceCommand::ProfileOpen { id } => {
                 self.open_profile(cx, id, false, move |result| {
                     send_result(reply, result.map(|()| IpcPayload::Ack));
                 });
             }
-            IpcCommand::ProfileNew { id } => {
+            WorkspaceCommand::ProfileNew { id } => {
                 self.open_profile(cx, id, true, move |result| {
                     send_result(reply, result.map(|()| IpcPayload::Ack));
                 });
             }
-            IpcCommand::ProfileActivate { id } => {
+            WorkspaceCommand::ProfileActivate { id } => {
                 let result = if !self.is_private && id == self.state.profile_id {
                     self.ui.window(cx, ids!(main_window)).show(cx);
                     Ok(IpcPayload::Ack)
@@ -763,20 +704,19 @@ impl App {
                 };
                 send_result(reply, result);
             }
-            IpcCommand::WorkspacePrivate => {
+            WorkspaceCommand::Private => {
                 send_result(
                     reply,
                     self.spawn_private_workspace(cx).map(|()| IpcPayload::Ack),
                 );
             }
-            IpcCommand::SettingsReload => {
+            WorkspaceCommand::SettingsReload => {
                 let result = self.reload_configs(cx).map(|()| {
                     self.show_toast(cx, "Reloaded config");
                     IpcPayload::Ack
                 });
                 send_result(reply, result);
             }
-            _ => unreachable!(),
         }
     }
 

@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use koma_ipc::protocol::{
-    DrawerKeepArgs, IpcCommand, IpcRequest, KomaListArgs, KomaPlacement, KomaTarget, KomaTextArgs,
-    NotificationSendArgs, TerminalNewArgs, TerminalTextArgs, WebClickArgs, WebEvalArgs,
-    WebFillArgs, WebReadArgs, WebReloadArgs,
+    DrawerCommand, DrawerKeepArgs, IpcCommand, IpcRequest, KomaCommand, KomaListArgs,
+    KomaPlacement, KomaTarget, KomaTextArgs, NotificationCommand, NotificationSendArgs,
+    SheetCommand, TerminalCommand, TerminalNewArgs, TerminalTextArgs, WebClickArgs, WebCommand,
+    WebEvalArgs, WebFillArgs, WebReadArgs, WebReloadArgs, WorkspaceCommand,
 };
 
 fn parse_non_empty(raw: &str) -> Result<String, String> {
@@ -379,57 +380,71 @@ impl Args {
 
     pub(super) fn into_request(self) -> IpcRequest {
         let command = match self.command {
-            Command::Health => IpcCommand::Health,
-            Command::Private => IpcCommand::WorkspacePrivate,
-            Command::Profile(Profile::List) => IpcCommand::ProfileList,
-            Command::Profile(Profile::New { name }) => IpcCommand::ProfileNew { id: name },
-            Command::Profile(Profile::Open { name }) => IpcCommand::ProfileOpen { id: name },
-            Command::Overview { command: None } => IpcCommand::Overview,
+            Command::Health => IpcCommand::Workspace(WorkspaceCommand::Health),
+            Command::Private => IpcCommand::Workspace(WorkspaceCommand::Private),
+            Command::Profile(Profile::List) => IpcCommand::Workspace(WorkspaceCommand::ProfileList),
+            Command::Profile(Profile::New { name }) => {
+                IpcCommand::Workspace(WorkspaceCommand::ProfileNew { id: name })
+            }
+            Command::Profile(Profile::Open { name }) => {
+                IpcCommand::Workspace(WorkspaceCommand::ProfileOpen { id: name })
+            }
+            Command::Overview { command: None } => IpcCommand::Sheet(SheetCommand::Overview),
             Command::Overview {
                 command: Some(Overview::Toggle),
-            } => IpcCommand::OverviewToggle,
-            Command::Sheet(Sheet::Focus { number }) => IpcCommand::SheetFocus {
+            } => IpcCommand::Sheet(SheetCommand::OverviewToggle),
+            Command::Sheet(Sheet::Focus { number }) => IpcCommand::Sheet(SheetCommand::Focus {
                 sheet_index: number,
-            },
-            Command::Sheet(Sheet::Close) => IpcCommand::SheetClose,
-            Command::Sheet(Sheet::List) => IpcCommand::SheetList,
-            Command::Sheet(Sheet::New { label, focus }) => IpcCommand::SheetNew { label, focus },
-            Command::Preset(Preset::List) => IpcCommand::PresetList,
-            Command::Preset(Preset::Save { name }) => IpcCommand::PresetSave { name },
-            Command::Preset(Preset::Apply { name }) => IpcCommand::PresetApply { name },
-            Command::List { sheet } => IpcCommand::KomaList(KomaListArgs { sheet_id: sheet }),
-            Command::Focused => IpcCommand::KomaFocused,
-            Command::Exists { target } => IpcCommand::KomaExists {
+            }),
+            Command::Sheet(Sheet::Close) => IpcCommand::Sheet(SheetCommand::Close),
+            Command::Sheet(Sheet::List) => IpcCommand::Sheet(SheetCommand::List),
+            Command::Sheet(Sheet::New { label, focus }) => {
+                IpcCommand::Sheet(SheetCommand::New { label, focus })
+            }
+            Command::Preset(Preset::List) => IpcCommand::Sheet(SheetCommand::PresetList),
+            Command::Preset(Preset::Save { name }) => {
+                IpcCommand::Sheet(SheetCommand::PresetSave { name })
+            }
+            Command::Preset(Preset::Apply { name }) => {
+                IpcCommand::Sheet(SheetCommand::PresetApply { name })
+            }
+            Command::List { sheet } => {
+                IpcCommand::Koma(KomaCommand::List(KomaListArgs { sheet_id: sheet }))
+            }
+            Command::Focused => IpcCommand::Koma(KomaCommand::Focused),
+            Command::Exists { target } => IpcCommand::Koma(KomaCommand::Exists {
                 koma_id: target.koma,
-            },
-            Command::Focus { target } => IpcCommand::KomaFocus {
+            }),
+            Command::Focus { target } => IpcCommand::Koma(KomaCommand::Focus {
                 koma_id: target.koma,
-            },
+            }),
             Command::Move {
                 target,
                 left_of,
                 right_of,
                 end_of,
-            } => IpcCommand::KomaMove {
+            } => IpcCommand::Koma(KomaCommand::Move {
                 koma_id: target.koma,
                 placement: left_of
                     .map(KomaPlacement::LeftOf)
                     .or_else(|| right_of.map(KomaPlacement::RightOf))
                     .or_else(|| end_of.map(KomaPlacement::EndOf))
                     .unwrap(),
-            },
-            Command::Resize { target, width } => IpcCommand::KomaResize {
+            }),
+            Command::Resize { target, width } => IpcCommand::Koma(KomaCommand::Resize {
                 koma_id: target.koma,
                 width,
-            },
-            Command::Close { target } => IpcCommand::KomaClose {
-                koma_id: target.koma,
-            },
-            Command::Web(Web::New { url, koma_api }) => IpcCommand::WebNew { url, koma_api },
-            Command::Web(Web::Url { target }) => IpcCommand::WebUrl(KomaTarget {
+            }),
+            Command::Close { target } => IpcCommand::Koma(KomaCommand::Close {
                 koma_id: target.koma,
             }),
-            Command::Web(Web::Devtools) => IpcCommand::WebDevtools,
+            Command::Web(Web::New { url, koma_api }) => {
+                IpcCommand::Web(WebCommand::New { url, koma_api })
+            }
+            Command::Web(Web::Url { target }) => IpcCommand::Web(WebCommand::Url(KomaTarget {
+                koma_id: target.koma,
+            })),
+            Command::Web(Web::Devtools) => IpcCommand::Web(WebCommand::Devtools),
             Command::Web(Web::Reload {
                 target,
                 koma_api,
@@ -440,114 +455,136 @@ impl Args {
                     (_, true) => Some(false),
                     _ => None,
                 };
-                IpcCommand::WebReload(WebReloadArgs {
+                IpcCommand::Web(WebCommand::Reload(WebReloadArgs {
                     koma_id: target.koma,
                     koma_api,
-                })
+                }))
             }
-            Command::Web(Web::Eval { target, expr }) => IpcCommand::WebEval(WebEvalArgs {
-                koma_id: target.koma,
-                script: expr,
-            }),
-            Command::Web(Web::Script { target, .. }) => IpcCommand::WebScriptTarget(KomaTarget {
-                koma_id: target.koma,
-            }),
-            Command::Web(Web::Snapshot { target }) => IpcCommand::WebSnapshot(KomaTarget {
-                koma_id: target.koma,
-            }),
-            Command::Web(Web::Read { target, within }) => IpcCommand::WebRead(WebReadArgs {
-                koma_id: target.koma,
-                within,
-            }),
-            Command::Web(Web::Text { target }) => IpcCommand::WebText(KomaTarget {
-                koma_id: target.koma,
-            }),
-            Command::Web(Web::Click { koma, target }) => IpcCommand::WebClick(WebClickArgs {
-                koma_id: koma.koma,
-                selector: target,
-            }),
-            Command::Web(Web::Fill { koma, target, text }) => IpcCommand::WebFill(WebFillArgs {
-                koma_id: koma.koma,
-                selector: target,
-                text,
-            }),
-            Command::Web(Web::Type { target, text }) => IpcCommand::WebType(KomaTextArgs {
-                koma_id: target.koma,
-                text,
-            }),
-            Command::Terminal(Terminal::New { cwd, run }) => {
-                IpcCommand::TerminalNew(TerminalNewArgs { cwd, run })
-            }
-            Command::Terminal(Terminal::Text { target, lines }) => {
-                IpcCommand::TerminalText(TerminalTextArgs {
+            Command::Web(Web::Eval { target, expr }) => {
+                IpcCommand::Web(WebCommand::Eval(WebEvalArgs {
                     koma_id: target.koma,
-                    lines: lines.map(NonZeroUsize::get),
-                })
+                    script: expr,
+                }))
             }
-            Command::Terminal(Terminal::Send { target, text }) => {
-                IpcCommand::TerminalSend(KomaTextArgs {
+            Command::Web(Web::Script { target, .. }) => {
+                IpcCommand::Web(WebCommand::ScriptTarget(KomaTarget {
+                    koma_id: target.koma,
+                }))
+            }
+            Command::Web(Web::Snapshot { target }) => {
+                IpcCommand::Web(WebCommand::Snapshot(KomaTarget {
+                    koma_id: target.koma,
+                }))
+            }
+            Command::Web(Web::Read { target, within }) => {
+                IpcCommand::Web(WebCommand::Read(WebReadArgs {
+                    koma_id: target.koma,
+                    within,
+                }))
+            }
+            Command::Web(Web::Text { target }) => IpcCommand::Web(WebCommand::Text(KomaTarget {
+                koma_id: target.koma,
+            })),
+            Command::Web(Web::Click { koma, target }) => {
+                IpcCommand::Web(WebCommand::Click(WebClickArgs {
+                    koma_id: koma.koma,
+                    selector: target,
+                }))
+            }
+            Command::Web(Web::Fill { koma, target, text }) => {
+                IpcCommand::Web(WebCommand::Fill(WebFillArgs {
+                    koma_id: koma.koma,
+                    selector: target,
+                    text,
+                }))
+            }
+            Command::Web(Web::Type { target, text }) => {
+                IpcCommand::Web(WebCommand::Type(KomaTextArgs {
                     koma_id: target.koma,
                     text,
-                })
+                }))
+            }
+            Command::Terminal(Terminal::New { cwd, run }) => {
+                IpcCommand::Terminal(TerminalCommand::New(TerminalNewArgs { cwd, run }))
+            }
+            Command::Terminal(Terminal::Text { target, lines }) => {
+                IpcCommand::Terminal(TerminalCommand::Text(TerminalTextArgs {
+                    koma_id: target.koma,
+                    lines: lines.map(NonZeroUsize::get),
+                }))
+            }
+            Command::Terminal(Terminal::Send { target, text }) => {
+                IpcCommand::Terminal(TerminalCommand::Send(KomaTextArgs {
+                    koma_id: target.koma,
+                    text,
+                }))
             }
             Command::Terminal(Terminal::Run { target, command }) => {
-                IpcCommand::TerminalRun(KomaTextArgs {
+                IpcCommand::Terminal(TerminalCommand::Run(KomaTextArgs {
                     koma_id: target.koma,
                     text: command,
-                })
+                }))
             }
             Command::Terminal(Terminal::Press { target, key }) => {
-                IpcCommand::TerminalPress(KomaTextArgs {
+                IpcCommand::Terminal(TerminalCommand::Press(KomaTextArgs {
                     koma_id: target.koma,
                     text: key,
-                })
+                }))
             }
             Command::Terminal(Terminal::Kill { target, signal }) => {
-                IpcCommand::TerminalKill(KomaTextArgs {
+                IpcCommand::Terminal(TerminalCommand::Kill(KomaTextArgs {
                     koma_id: target.koma,
                     text: signal,
-                })
+                }))
             }
-            Command::Drawer(Drawer::List) => IpcCommand::DrawerList,
+            Command::Drawer(Drawer::List) => IpcCommand::Drawer(DrawerCommand::List),
             Command::Drawer(Drawer::Keep {
                 input,
                 title,
                 koma_api,
-            }) => IpcCommand::DrawerKeep(DrawerKeepArgs {
+            }) => IpcCommand::Drawer(DrawerCommand::Keep(DrawerKeepArgs {
                 input,
                 title,
                 koma_api,
-            }),
-            Command::Drawer(Drawer::Place { target, id }) => IpcCommand::DrawerPlace(KomaTarget {
-                koma_id: target.koma.or(id),
-            }),
-            Command::Drawer(Drawer::Discard { target, id }) => {
-                IpcCommand::DrawerDiscard(KomaTarget {
+            })),
+            Command::Drawer(Drawer::Place { target, id }) => {
+                IpcCommand::Drawer(DrawerCommand::Place(KomaTarget {
                     koma_id: target.koma.or(id),
-                })
+                }))
             }
-            Command::Drawer(Drawer::Restore) => IpcCommand::DrawerRestore,
+            Command::Drawer(Drawer::Discard { target, id }) => {
+                IpcCommand::Drawer(DrawerCommand::Discard(KomaTarget {
+                    koma_id: target.koma.or(id),
+                }))
+            }
+            Command::Drawer(Drawer::Restore) => IpcCommand::Drawer(DrawerCommand::Restore),
             Command::Notification(Notification::Send {
                 target,
                 body,
                 title,
-            }) => IpcCommand::NotificationSend(NotificationSendArgs {
+            }) => IpcCommand::Notification(NotificationCommand::Send(NotificationSendArgs {
                 koma_id: target.koma,
                 title,
                 body,
-            }),
-            Command::Notification(Notification::List { unread }) => IpcCommand::NotificationList {
-                unread_only: unread,
-            },
-            Command::Notification(Notification::Read { id }) => IpcCommand::NotificationRead { id },
-            Command::Notification(Notification::Unread { id }) => {
-                IpcCommand::NotificationUnread { id }
+            })),
+            Command::Notification(Notification::List { unread }) => {
+                IpcCommand::Notification(NotificationCommand::List {
+                    unread_only: unread,
+                })
             }
-            Command::Bench(Bench::SpawnWebs { count }) => IpcCommand::BenchSpawnWebs { count },
+            Command::Notification(Notification::Read { id }) => {
+                IpcCommand::Notification(NotificationCommand::Read { id })
+            }
+            Command::Notification(Notification::Unread { id }) => {
+                IpcCommand::Notification(NotificationCommand::Unread { id })
+            }
+            Command::Bench(Bench::SpawnWebs { count }) => {
+                IpcCommand::Web(WebCommand::BenchSpawnWebs { count })
+            }
             Command::Settings {
                 command: Some(SettingsAction::Reload),
                 ..
-            } => IpcCommand::SettingsReload,
+            } => IpcCommand::Workspace(WorkspaceCommand::SettingsReload),
             Command::Settings { .. } => unreachable!("settings is handled locally"),
         };
         IpcRequest {
@@ -577,34 +614,49 @@ mod tests {
     #[test]
     fn maps_commands_to_ipc() {
         for (argv, expected) in [
-            (&["private"][..], IpcCommand::WorkspacePrivate),
-            (&["profile", "list"], IpcCommand::ProfileList),
+            (
+                &["private"][..],
+                IpcCommand::Workspace(WorkspaceCommand::Private),
+            ),
+            (
+                &["profile", "list"],
+                IpcCommand::Workspace(WorkspaceCommand::ProfileList),
+            ),
             (
                 &["profile", "new", "work"],
-                IpcCommand::ProfileNew { id: "work".into() },
+                IpcCommand::Workspace(WorkspaceCommand::ProfileNew { id: "work".into() }),
             ),
             (
                 &["profile", "open", "work"],
-                IpcCommand::ProfileOpen { id: "work".into() },
+                IpcCommand::Workspace(WorkspaceCommand::ProfileOpen { id: "work".into() }),
             ),
-            (&["overview"], IpcCommand::Overview),
-            (&["overview", "toggle"], IpcCommand::OverviewToggle),
-            (&["sheet", "close"], IpcCommand::SheetClose),
-            (&["preset", "list"], IpcCommand::PresetList),
+            (&["overview"], IpcCommand::Sheet(SheetCommand::Overview)),
+            (
+                &["overview", "toggle"],
+                IpcCommand::Sheet(SheetCommand::OverviewToggle),
+            ),
+            (&["sheet", "close"], IpcCommand::Sheet(SheetCommand::Close)),
+            (
+                &["preset", "list"],
+                IpcCommand::Sheet(SheetCommand::PresetList),
+            ),
             (
                 &["preset", "save", "Work"],
-                IpcCommand::PresetSave {
+                IpcCommand::Sheet(SheetCommand::PresetSave {
                     name: "Work".into(),
-                },
+                }),
             ),
             (
                 &["preset", "apply", "Work"],
-                IpcCommand::PresetApply {
+                IpcCommand::Sheet(SheetCommand::PresetApply {
                     name: "Work".into(),
-                },
+                }),
             ),
-            (&["web", "devtools"], IpcCommand::WebDevtools),
-            (&["settings", "reload"], IpcCommand::SettingsReload),
+            (&["web", "devtools"], IpcCommand::Web(WebCommand::Devtools)),
+            (
+                &["settings", "reload"],
+                IpcCommand::Workspace(WorkspaceCommand::SettingsReload),
+            ),
         ] {
             let req = parse(argv).unwrap().into_request();
             assert_eq!(req.command, expected);
@@ -619,9 +671,9 @@ mod tests {
         assert_eq!(timeout.get(), 30);
         assert_eq!(
             args.into_request().command,
-            IpcCommand::WebScriptTarget(KomaTarget {
+            IpcCommand::Web(WebCommand::ScriptTarget(KomaTarget {
                 koma_id: Some("koma-2".into())
-            })
+            }))
         );
         assert!(parse(&["web", "script", "--timeout", "0", "test.mjs"]).is_err());
     }
@@ -638,10 +690,10 @@ mod tests {
             .into_request();
         assert_eq!(
             request.command,
-            IpcCommand::KomaMove {
+            IpcCommand::Koma(KomaCommand::Move {
                 koma_id: "b1".into(),
                 placement: KomaPlacement::EndOf("d1".into()),
-            }
+            })
         );
     }
 
@@ -657,10 +709,10 @@ mod tests {
         let req = args.into_request();
         assert_eq!(
             req.command,
-            IpcCommand::WebRead(WebReadArgs {
+            IpcCommand::Web(WebCommand::Read(WebReadArgs {
                 koma_id: Some("b1".into()),
                 within: Some("@e1".into()),
-            })
+            }))
         );
 
         let req = parse(&[
@@ -675,11 +727,11 @@ mod tests {
         .into_request();
         assert_eq!(
             req.command,
-            IpcCommand::DrawerKeep(DrawerKeepArgs {
+            IpcCommand::Drawer(DrawerCommand::Keep(DrawerKeepArgs {
                 input: "example.com".into(),
                 title: Some("Ex".into()),
                 koma_api: true,
-            })
+            }))
         );
 
         let req = parse(&["notification", "send", "Build done", "--title", "-CI"])
@@ -687,11 +739,11 @@ mod tests {
             .into_request();
         assert_eq!(
             req.command,
-            IpcCommand::NotificationSend(NotificationSendArgs {
+            IpcCommand::Notification(NotificationCommand::Send(NotificationSendArgs {
                 koma_id: None,
                 title: Some("-CI".into()),
                 body: "Build done".into(),
-            })
+            }))
         );
     }
 
@@ -702,10 +754,10 @@ mod tests {
             .into_request();
         assert_eq!(
             req.command,
-            IpcCommand::TerminalSend(KomaTextArgs {
+            IpcCommand::Terminal(TerminalCommand::Send(KomaTextArgs {
                 koma_id: None,
                 text: "-n".into(),
-            })
+            }))
         );
     }
 
@@ -716,10 +768,10 @@ mod tests {
             .into_request();
         assert_eq!(
             req.command,
-            IpcCommand::TerminalText(TerminalTextArgs {
+            IpcCommand::Terminal(TerminalCommand::Text(TerminalTextArgs {
                 koma_id: None,
                 lines: Some(20),
-            })
+            }))
         );
         assert!(parse(&["terminal", "text", "--lines", "0"]).is_err());
         let err = parse(&["web", "reload", "--koma-api", "--no-koma-api"]).unwrap_err();

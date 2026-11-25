@@ -104,95 +104,104 @@ pub struct KomaListArgs {
 // enum struct-variant serializer can emit a trailing comma when an `Option` is `None`.
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
 pub enum IpcCommand {
-    Health,
-    WorkspacePrivate,
-    ProfileList,
-    ProfileNew {
-        id: String,
-    },
-    ProfileOpen {
-        id: String,
-    },
-    ProfileActivate {
-        id: String,
-    },
-    Overview,
-    OverviewToggle,
-    KomaList(KomaListArgs),
-    KomaFocused,
-    KomaExists {
+    Koma(KomaCommand),
+    Sheet(SheetCommand),
+    Web(WebCommand),
+    Terminal(TerminalCommand),
+    Drawer(DrawerCommand),
+    Notification(NotificationCommand),
+    Workspace(WorkspaceCommand),
+}
+
+#[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
+pub enum KomaCommand {
+    List(KomaListArgs),
+    Focused,
+    Exists {
         koma_id: String,
     },
-    KomaFocus {
+    Focus {
         koma_id: String,
     },
-    KomaMove {
+    Move {
         koma_id: String,
         placement: KomaPlacement,
     },
-    KomaResize {
+    Resize {
         koma_id: String,
         width: f64,
     },
-    KomaClose {
+    Close {
         koma_id: String,
     },
-    SheetFocus {
-        sheet_index: usize,
-    },
-    SheetClose,
-    SheetList,
-    SheetNew {
-        label: String,
-        focus: bool,
-    },
+}
+
+#[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
+pub enum SheetCommand {
+    Focus { sheet_index: usize },
+    Close,
+    List,
+    New { label: String, focus: bool },
     PresetList,
-    PresetSave {
-        name: String,
-    },
-    PresetApply {
-        name: String,
-    },
-    WebNew {
-        url: String,
-        koma_api: bool,
-    },
-    WebUrl(KomaTarget),
-    WebDevtools,
-    WebReload(WebReloadArgs),
-    WebEval(WebEvalArgs),
-    WebScriptTarget(KomaTarget),
-    WebSnapshot(KomaTarget),
-    WebRead(WebReadArgs),
-    WebText(KomaTarget),
-    WebClick(WebClickArgs),
-    WebFill(WebFillArgs),
-    WebType(KomaTextArgs),
-    TerminalNew(TerminalNewArgs),
-    TerminalText(TerminalTextArgs),
-    TerminalSend(KomaTextArgs),
-    TerminalRun(KomaTextArgs),
-    TerminalPress(KomaTextArgs),
-    TerminalKill(KomaTextArgs),
-    DrawerList,
-    DrawerKeep(DrawerKeepArgs),
-    DrawerPlace(KomaTarget),
-    DrawerDiscard(KomaTarget),
-    DrawerRestore,
-    NotificationSend(NotificationSendArgs),
-    NotificationList {
-        unread_only: bool,
-    },
-    NotificationRead {
-        id: String,
-    },
-    NotificationUnread {
-        id: String,
-    },
+    PresetSave { name: String },
+    PresetApply { name: String },
+    Overview,
+    OverviewToggle,
+}
+
+#[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
+pub enum WebCommand {
+    New { url: String, koma_api: bool },
+    Url(KomaTarget),
+    Devtools,
+    Reload(WebReloadArgs),
+    Eval(WebEvalArgs),
+    ScriptTarget(KomaTarget),
+    Snapshot(KomaTarget),
+    Read(WebReadArgs),
+    Text(KomaTarget),
+    Click(WebClickArgs),
+    Fill(WebFillArgs),
+    Type(KomaTextArgs),
+    BenchSpawnWebs { count: usize },
+}
+
+#[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
+pub enum TerminalCommand {
+    New(TerminalNewArgs),
+    Text(TerminalTextArgs),
+    Send(KomaTextArgs),
+    Run(KomaTextArgs),
+    Press(KomaTextArgs),
+    Kill(KomaTextArgs),
+}
+
+#[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
+pub enum DrawerCommand {
+    List,
+    Keep(DrawerKeepArgs),
+    Place(KomaTarget),
+    Discard(KomaTarget),
+    Restore,
+}
+
+#[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
+pub enum NotificationCommand {
+    Send(NotificationSendArgs),
+    List { unread_only: bool },
+    Read { id: String },
+    Unread { id: String },
+}
+
+#[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
+pub enum WorkspaceCommand {
+    Health,
+    Private,
+    ProfileList,
+    ProfileNew { id: String },
+    ProfileOpen { id: String },
+    ProfileActivate { id: String },
     SettingsReload,
-    BenchSpawnWebs {
-        count: usize,
-    },
 }
 
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
@@ -383,21 +392,21 @@ mod tests {
     #[test]
     fn request_and_response_json_round_trip() {
         let requests = [
-            IpcRequest::new(IpcCommand::Health),
+            IpcRequest::new(IpcCommand::Workspace(WorkspaceCommand::Health)),
             IpcRequest {
                 caller_koma_id: Some("b-1".into()),
                 profile_id: None,
-                command: IpcCommand::WebFill(WebFillArgs {
+                command: IpcCommand::Web(WebCommand::Fill(WebFillArgs {
                     koma_id: None,
                     selector: "#email".into(),
                     text: "alice@example.com".into(),
-                }),
+                })),
             },
-            IpcRequest::new(IpcCommand::DrawerKeep(DrawerKeepArgs {
+            IpcRequest::new(IpcCommand::Drawer(DrawerCommand::Keep(DrawerKeepArgs {
                 input: "https://example.com".into(),
                 title: None,
                 koma_api: false,
-            })),
+            }))),
         ];
         for req in requests {
             let json = req.serialize_json();

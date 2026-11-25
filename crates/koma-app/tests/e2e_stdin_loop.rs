@@ -5,8 +5,9 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use koma_ipc::protocol::{
-    IpcCommand, IpcPayload, IpcRequest, KomaListArgs, KomaPlacement, KomaTextArgs, TerminalNewArgs,
-    TerminalTextArgs,
+    DrawerCommand, IpcCommand, IpcPayload, IpcRequest, KomaCommand, KomaListArgs, KomaPlacement,
+    KomaTextArgs, SheetCommand, TerminalCommand, TerminalNewArgs, TerminalTextArgs, WebCommand,
+    WorkspaceCommand,
 };
 use koma_ipc::transport::send_request;
 use makepad_app_host::hub::{send_to_app, AppHub, HubEvent};
@@ -116,8 +117,11 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         send_batch(&sender, vec![StudioToApp::Tick]);
         while hub.rx.try_recv().is_ok() {}
         if sock_path.exists()
-            && send_request(&sock_str, &IpcRequest::new(IpcCommand::Health))
-                .is_ok_and(|r| r.is_ok())
+            && send_request(
+                &sock_str,
+                &IpcRequest::new(IpcCommand::Workspace(WorkspaceCommand::Health)),
+            )
+            .is_ok_and(|r| r.is_ok())
         {
             ready = true;
             break;
@@ -137,24 +141,32 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
             .len(),
         2
     );
-    let profiles = send_request(&sock_str, &IpcRequest::new(IpcCommand::ProfileList))
-        .unwrap()
-        .into_result()
-        .unwrap();
+    let profiles = send_request(
+        &sock_str,
+        &IpcRequest::new(IpcCommand::Workspace(WorkspaceCommand::ProfileList)),
+    )
+    .unwrap()
+    .into_result()
+    .unwrap();
     assert_eq!(
         profiles,
         IpcPayload::ProfileList {
             profiles: vec!["default".into()]
         }
     );
-    let other_profile = IpcRequest::new(IpcCommand::ProfileActivate { id: "other".into() });
+    let other_profile = IpcRequest::new(IpcCommand::Workspace(WorkspaceCommand::ProfileActivate {
+        id: "other".into(),
+    }));
     assert!(!send_request(&sock_str, &other_profile).unwrap().is_ok());
 
     // Initially Sheet 1 is empty.
-    let ov = send_request(&sock_str, &IpcRequest::new(IpcCommand::Overview))
-        .unwrap()
-        .into_result()
-        .unwrap();
+    let ov = send_request(
+        &sock_str,
+        &IpcRequest::new(IpcCommand::Sheet(SheetCommand::Overview)),
+    )
+    .unwrap()
+    .into_result()
+    .unwrap();
     let IpcPayload::Overview { sheets } = ov else {
         panic!("expected overview payload, got {ov:?}");
     };
@@ -187,10 +199,13 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
     while Instant::now() < deadline {
         send_batch(&sender, vec![StudioToApp::Tick]);
         while hub.rx.try_recv().is_ok() {}
-        let ov = send_request(&sock_str, &IpcRequest::new(IpcCommand::Overview))
-            .unwrap()
-            .into_result()
-            .unwrap();
+        let ov = send_request(
+            &sock_str,
+            &IpcRequest::new(IpcCommand::Sheet(SheetCommand::Overview)),
+        )
+        .unwrap()
+        .into_result()
+        .unwrap();
         if let IpcPayload::Overview { sheets } = ov {
             if sheets[0].komas.len() == 1 {
                 created = true;
@@ -230,7 +245,9 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         while hub.rx.try_recv().is_ok() {}
         if let Ok(res) = send_request(
             &sock_str,
-            &IpcRequest::new(IpcCommand::TerminalText(TerminalTextArgs::default())),
+            &IpcRequest::new(IpcCommand::Terminal(TerminalCommand::Text(
+                TerminalTextArgs::default(),
+            ))),
         ) {
             if let Ok(IpcPayload::Text { text, .. }) = res.into_result() {
                 if text.contains("日本語テスト") {
@@ -270,10 +287,13 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
     while Instant::now() < deadline {
         send_batch(&sender, vec![StudioToApp::Tick]);
         while hub.rx.try_recv().is_ok() {}
-        let dl = send_request(&sock_str, &IpcRequest::new(IpcCommand::DrawerList))
-            .unwrap()
-            .into_result()
-            .unwrap();
+        let dl = send_request(
+            &sock_str,
+            &IpcRequest::new(IpcCommand::Drawer(DrawerCommand::List)),
+        )
+        .unwrap()
+        .into_result()
+        .unwrap();
         if let IpcPayload::DrawerList { items } = dl {
             if items.len() == 1 {
                 stowed = true;
@@ -292,58 +312,64 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
             .unwrap()
             .into_result()
     };
-    let IpcPayload::SheetId { sheet_id } = ipc(IpcCommand::SheetNew {
+    let IpcPayload::SheetId { sheet_id } = ipc(IpcCommand::Sheet(SheetCommand::New {
         label: "Checks".into(),
         focus: false,
-    })
+    }))
     .unwrap() else {
         panic!("expected new Sheet ID")
     };
-    let IpcPayload::KomaId { koma_id } = ipc(IpcCommand::TerminalNew(TerminalNewArgs {
-        cwd: None,
-        run: Some("printf '%s-%s\\n' FIRST CHECK".into()),
-    }))
+    let IpcPayload::KomaId { koma_id } = ipc(IpcCommand::Terminal(TerminalCommand::New(
+        TerminalNewArgs {
+            cwd: None,
+            run: Some("printf '%s-%s\\n' FIRST CHECK".into()),
+        },
+    )))
     .unwrap() else {
         panic!("expected new Koma ID")
     };
     assert_eq!(
-        ipc(IpcCommand::KomaMove {
+        ipc(IpcCommand::Koma(KomaCommand::Move {
             koma_id: koma_id.clone(),
             placement: KomaPlacement::EndOf(koma_id.clone()),
-        })
+        }))
         .unwrap_err(),
         format!("Sheet not found: {koma_id}")
     );
-    ipc(IpcCommand::KomaMove {
+    ipc(IpcCommand::Koma(KomaCommand::Move {
         koma_id: koma_id.clone(),
         placement: KomaPlacement::EndOf(sheet_id.clone()),
-    })
+    }))
     .unwrap();
-    let IpcPayload::SheetList { sheets } = ipc(IpcCommand::SheetList).unwrap() else {
+    let IpcPayload::SheetList { sheets } = ipc(IpcCommand::Sheet(SheetCommand::List)).unwrap()
+    else {
         panic!("expected Sheet list");
     };
     assert!(sheets[0].is_active);
     assert_eq!(sheets[1].koma_count, 1);
-    let IpcPayload::KomaList { komas, .. } = ipc(IpcCommand::KomaList(KomaListArgs {
-        sheet_id: Some(sheet_id.clone()),
-    }))
-    .unwrap() else {
+    let IpcPayload::KomaList { komas, .. } =
+        ipc(IpcCommand::Koma(KomaCommand::List(KomaListArgs {
+            sheet_id: Some(sheet_id.clone()),
+        })))
+        .unwrap()
+    else {
         panic!("expected Koma list")
     };
     assert_eq!(komas[0].id, koma_id);
     assert!(matches!(
-        ipc(IpcCommand::KomaResize {
+        ipc(IpcCommand::Koma(KomaCommand::Resize {
             koma_id: koma_id.clone(),
             width: 900.0,
-        })
+        }))
         .unwrap(),
         IpcPayload::KomaResized { width: 900.0, .. }
     ));
-    ipc(IpcCommand::KomaFocus {
+    ipc(IpcCommand::Koma(KomaCommand::Focus {
         koma_id: koma_id.clone(),
-    })
+    }))
     .unwrap();
-    let IpcPayload::KomaFocused(focused) = ipc(IpcCommand::KomaFocused).unwrap() else {
+    let IpcPayload::KomaFocused(focused) = ipc(IpcCommand::Koma(KomaCommand::Focused)).unwrap()
+    else {
         panic!("expected focused Koma");
     };
     assert_eq!(focused.sheet_id, sheet_id);
@@ -354,10 +380,12 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         loop {
             send_batch(&sender, vec![StudioToApp::Tick]);
             while hub.rx.try_recv().is_ok() {}
-            let IpcPayload::Text { text, .. } = ipc(IpcCommand::TerminalText(TerminalTextArgs {
-                koma_id: Some(koma_id.clone()),
-                lines: Some(100),
-            }))
+            let IpcPayload::Text { text, .. } = ipc(IpcCommand::Terminal(TerminalCommand::Text(
+                TerminalTextArgs {
+                    koma_id: Some(koma_id.clone()),
+                    lines: Some(100),
+                },
+            )))
             .unwrap() else {
                 panic!("expected terminal text")
             };
@@ -376,15 +404,15 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         koma_id: Some(koma_id.clone()),
         text: text.into(),
     };
-    ipc(IpcCommand::TerminalSend(input(
+    ipc(IpcCommand::Terminal(TerminalCommand::Send(input(
         "printf '%s-%s\\n' SECOND CHECK",
-    )))
+    ))))
     .unwrap();
-    ipc(IpcCommand::TerminalPress(input("Enter"))).unwrap();
+    ipc(IpcCommand::Terminal(TerminalCommand::Press(input("Enter")))).unwrap();
     wait_for_text("SECOND-CHECK");
-    ipc(IpcCommand::TerminalRun(input(
+    ipc(IpcCommand::Terminal(TerminalCommand::Run(input(
         "printf '%s-%s\\n' THIRD CHECK",
-    )))
+    ))))
     .unwrap();
     wait_for_text("THIRD-CHECK");
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -392,9 +420,9 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         use makepad_studio_protocol::{PinchPhase, RemotePinch};
 
         let grid = |mark: &str| -> Vec<usize> {
-            ipc(IpcCommand::TerminalRun(input(&format!(
+            ipc(IpcCommand::Terminal(TerminalCommand::Run(input(&format!(
                 "printf '%s%s ' GRID- {mark}; stty size"
-            ))))
+            )))))
             .unwrap();
             let prefix = format!("GRID-{mark} ");
             wait_for_text(&prefix)
@@ -456,9 +484,9 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         std::fs::create_dir(&reported_cwd).unwrap();
         let reported_uri =
             format!("file://localhost{}", reported_cwd.display()).replace(' ', "%20");
-        ipc(IpcCommand::TerminalRun(input(&format!(
+        ipc(IpcCommand::Terminal(TerminalCommand::Run(input(&format!(
             "/bin/sh -c 'trap \"echo FOREGROUND\"\"-DONE; exit 0\" TERM; printf \"\\033]2;Working label\\007\\033]7;%s\\007\" \"{reported_uri}\"; printf \"%s-%s\\n\" FOREGROUND READY; sleep 30'",
-        ))))
+        )))))
         .unwrap();
         wait_for_text("FOREGROUND-READY");
         let saved = koma_app::persistence::load(&profile_dir).unwrap().unwrap();
@@ -468,21 +496,21 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
             terminal.cwd.as_deref().map(std::path::Path::new),
             Some(reported_cwd.as_path())
         );
-        ipc(IpcCommand::TerminalKill(input("TERM"))).unwrap();
+        ipc(IpcCommand::Terminal(TerminalCommand::Kill(input("TERM")))).unwrap();
         wait_for_text("FOREGROUND-DONE");
     }
-    ipc(IpcCommand::KomaClose {
+    ipc(IpcCommand::Koma(KomaCommand::Close {
         koma_id: koma_id.clone(),
-    })
+    }))
     .unwrap();
     assert!(matches!(
-        ipc(IpcCommand::KomaExists {
+        ipc(IpcCommand::Koma(KomaCommand::Exists {
             koma_id: koma_id.clone()
-        })
+        }))
         .unwrap(),
         IpcPayload::KomaExists { exists: false, .. }
     ));
-    ipc(IpcCommand::SheetFocus { sheet_index: 1 }).unwrap();
+    ipc(IpcCommand::Sheet(SheetCommand::Focus { sheet_index: 1 })).unwrap();
 
     let reopen_koma = |time_base: f64| {
         send_batch(
@@ -510,7 +538,9 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         loop {
             send_batch(&sender, vec![StudioToApp::Tick]);
             while hub.rx.try_recv().is_ok() {}
-            let IpcPayload::KomaFocused(focused) = ipc(IpcCommand::KomaFocused).unwrap() else {
+            let IpcPayload::KomaFocused(focused) =
+                ipc(IpcCommand::Koma(KomaCommand::Focused)).unwrap()
+            else {
                 panic!("expected focused Koma");
             };
             if focused.koma.as_ref().is_some_and(|koma| koma.id == koma_id) {
@@ -549,16 +579,22 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         koma_id: Some(koma_id.clone()),
         text: text.into(),
     };
-    ipc(IpcCommand::TerminalSend(exit_input("exit"))).unwrap();
-    ipc(IpcCommand::TerminalPress(exit_input("Enter"))).unwrap();
+    ipc(IpcCommand::Terminal(TerminalCommand::Send(exit_input(
+        "exit",
+    ))))
+    .unwrap();
+    ipc(IpcCommand::Terminal(TerminalCommand::Press(exit_input(
+        "Enter",
+    ))))
+    .unwrap();
     let exit_deadline = Instant::now() + Duration::from_secs(5);
     loop {
         send_batch(&sender, vec![StudioToApp::Tick]);
         while hub.rx.try_recv().is_ok() {}
         if matches!(
-            ipc(IpcCommand::KomaExists {
+            ipc(IpcCommand::Koma(KomaCommand::Exists {
                 koma_id: koma_id.clone()
-            })
+            }))
             .unwrap(),
             IpcPayload::KomaExists { exists: false, .. }
         ) {
@@ -603,17 +639,17 @@ fn verify_web_zoom(
     use koma_ipc::protocol::WebEvalArgs;
     use makepad_studio_protocol::{PinchPhase, RemotePinch};
 
-    ipc(IpcCommand::KomaClose {
+    ipc(IpcCommand::Koma(KomaCommand::Close {
         koma_id: terminal.into(),
-    })
+    }))
     .unwrap();
     let html = tmp.join("zoom.html");
     std::fs::write(&html, "<!doctype html><title>Zoom test</title>").unwrap();
     let new_page = || {
-        let IpcPayload::WebKoma(web) = ipc(IpcCommand::WebNew {
+        let IpcPayload::WebKoma(web) = ipc(IpcCommand::Web(WebCommand::New {
             url: html.display().to_string(),
             koma_api: false,
-        })
+        }))
         .unwrap() else {
             panic!("expected Web Koma ID")
         };
@@ -624,10 +660,10 @@ fn verify_web_zoom(
     let wait_number = |id: &str, expr: &str, accept: &dyn Fn(f64) -> bool| {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            let outcome = ipc(IpcCommand::WebEval(WebEvalArgs {
+            let outcome = ipc(IpcCommand::Web(WebCommand::Eval(WebEvalArgs {
                 koma_id: Some(id.into()),
                 script: format!("document.title === 'Zoom test' ? ({expr}) : null"),
-            }));
+            })));
             if let Ok(IpcPayload::WebEval { value, .. }) = &outcome {
                 if let Ok(number) = value.parse::<f64>() {
                     if accept(number) {
@@ -671,7 +707,7 @@ fn verify_web_zoom(
     pinch(1.13);
     let visual = wait_number(&a, "visualViewport.scale", &|scale| scale > 1.1);
     let other_width = wait_number(&b, "innerWidth", &|_| true);
-    ipc(IpcCommand::KomaFocus { koma_id: a.clone() }).unwrap();
+    ipc(IpcCommand::Koma(KomaCommand::Focus { koma_id: a.clone() })).unwrap();
     send_primary_key(sender, KeyCode::Equals, 6.0);
     let zoomed_width = |value: f64| (value - width / 1.1).abs() <= 1.0;
     wait_number(&a, "innerWidth", &zoomed_width);
