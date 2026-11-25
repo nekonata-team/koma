@@ -50,6 +50,18 @@ script_mod! {
                         height: Fill
                     }
 
+                    sheet_line_menu_overlay := View{
+                        width: Fit
+                        height: Fill
+                        align: Align{x: 0.0 y: 0.5}
+                        padding: Inset{left: 6}
+
+                        sheet_line_menu := LineMenu{
+                            scroll_view: ""
+                            follow_scroll: false
+                        }
+                    }
+
                     palette_overlay := View{
                         visible: false
                         new_batch: true
@@ -409,9 +421,33 @@ impl App {
         }
     }
 
+    pub(super) fn sync_sheet_line_menu(&self, cx: &mut Cx) {
+        let visible = self.state.mode != InputMode::Overview;
+        self.ui
+            .view(cx, ids!(sheet_line_menu_overlay))
+            .set_visible(cx, visible);
+        let menu = self.ui.line_menu(cx, ids!(sheet_line_menu));
+        let sections: Vec<LineSection> = self
+            .state
+            .sheets()
+            .iter()
+            .map(|sheet| {
+                LineSection::new("", &sheet.label, 1).with_id(LiveId::from_str(sheet.id.as_str()))
+            })
+            .collect();
+        if menu.sections() != sections {
+            menu.set_sections(cx, sections);
+        }
+        let current_id = LiveId::from_str(self.state.current_sheet().id.as_str());
+        if menu.current() != Some(current_id) {
+            menu.set_current(cx, current_id);
+        }
+    }
+
     pub(super) fn sync_after_mutation(&mut self, cx: &mut Cx, reveal_focused: bool) {
         self.save_state(cx);
         self.sync_strip(cx, reveal_focused);
+        self.sync_sheet_line_menu(cx);
         self.render_drawer_overlay(cx);
         self.render_notifications_overlay(cx);
         self.apply_focus(cx);

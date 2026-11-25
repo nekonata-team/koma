@@ -231,6 +231,7 @@ impl App {
         }
         self.apply_theme(cx);
         self.sync_strip(cx, true);
+        self.sync_sheet_line_menu(cx);
         self.apply_focus(cx);
         self.update_status(cx);
         if let Some(ipc) = self.ipc.as_mut().filter(|_| self.is_private) {

@@ -450,6 +450,21 @@ impl MatchEvent for App {
         self.handle_dialog_actions(cx, actions);
         self.handle_prompt_actions(cx, actions);
 
+        if let Some(sheet_live_id) = self.ui.line_menu(cx, ids!(sheet_line_menu)).jumped(actions) {
+            if let Some(idx) = self
+                .state
+                .sheets()
+                .iter()
+                .position(|sheet| LiveId::from_str(sheet.id.as_str()) == sheet_live_id)
+            {
+                if self.state.switch_sheet(idx) {
+                    self.sync_after_mutation(cx, true);
+                } else {
+                    self.apply_focus(cx);
+                }
+            }
+        }
+
         let mut terminal_metadata_changed = false;
         for action in actions {
             if let Some(file_action) = action.downcast_ref::<FileDialogAction>() {
