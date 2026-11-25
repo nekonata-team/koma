@@ -435,6 +435,12 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         };
         let base = grid("BASE");
         assert_eq!(base.len(), 2);
+        // Let the Sheet switch slide animation settle before sending a content pinch.
+        for _ in 0..10 {
+            send_batch(&sender, vec![StudioToApp::Tick]);
+            while hub.rx.try_recv().is_ok() {}
+            std::thread::sleep(Duration::from_millis(50));
+        }
         let pinch = |phase, x, scale, time| {
             StudioToApp::Pinch(RemotePinch {
                 phase,
@@ -489,13 +495,25 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         )))))
         .unwrap();
         wait_for_text("FOREGROUND-READY");
-        let saved = koma_app::persistence::load(&profile_dir).unwrap().unwrap();
-        let terminal = saved.koma_by_id(&koma_id.as_str().into()).unwrap();
-        assert_eq!(terminal.label, "Working label");
-        assert_eq!(
-            terminal.cwd.as_deref().map(std::path::Path::new),
-            Some(reported_cwd.as_path())
-        );
+        let metadata_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            send_batch(&sender, vec![StudioToApp::Tick]);
+            while hub.rx.try_recv().is_ok() {}
+            let saved = koma_app::persistence::load(&profile_dir).unwrap().unwrap();
+            let terminal = saved.koma_by_id(&koma_id.as_str().into()).unwrap();
+            if terminal.label == "Working label"
+                && terminal.cwd.as_deref().map(std::path::Path::new) == Some(reported_cwd.as_path())
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < metadata_deadline,
+                "terminal metadata did not persist: label={:?} cwd={:?}",
+                terminal.label,
+                terminal.cwd
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
         ipc(IpcCommand::Terminal(TerminalCommand::Kill(input("TERM")))).unwrap();
         wait_for_text("FOREGROUND-DONE");
     }
