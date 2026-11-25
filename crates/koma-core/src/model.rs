@@ -1,9 +1,9 @@
 //! Core Koma domain model (UI- and Makepad-independent).
 
-use std::collections::HashMap;
-
 mod drawer;
+mod history;
 mod ids;
+mod layout;
 mod notifications;
 mod sheet_presets;
 
@@ -17,7 +17,6 @@ pub const MIN_PROPORTIONAL_WIDTH: f64 = 200.0;
 pub const DEFAULT_WIDTH_PRESETS: [f64; 4] = [1.0 / 3.0, 0.5, 2.0 / 3.0, 1.0];
 pub const MAX_NOTIFICATIONS: usize = 100;
 pub const MAX_RECENTS: usize = 20;
-const MAX_CLOSED_KOMAS: usize = 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecentEntry {
@@ -172,68 +171,6 @@ impl WorkspaceState {
         }
     }
 
-    /// Restore Sheets and Drawer while initializing transient state as for a new Workspace.
-    pub fn restore_layout(
-        profile_id: String,
-        mut sheets: Vec<SheetState>,
-        active_sheet_index: usize,
-        drawer: Vec<KomaMeta>,
-    ) -> Result<Self, String> {
-        if active_sheet_index >= sheets.len() {
-            return Err("State has no valid active Sheet".into());
-        }
-
-        let mut sheet_positions = HashMap::new();
-        for (index, sheet) in sheets.iter().enumerate() {
-            let position = index + 1;
-            if let Some(first) = sheet_positions.insert(&sheet.id, position) {
-                return Err(format!(
-                    "Duplicate Sheet ID {} at Sheet positions {first} and {position}",
-                    sheet.id
-                ));
-            }
-        }
-
-        let mut koma_locations = HashMap::new();
-        let groups = sheets
-            .iter()
-            .map(|sheet| (Some(&sheet.id), sheet.komas.as_slice()))
-            .chain(std::iter::once((None, drawer.as_slice())));
-        for (sheet_id, komas) in groups {
-            for (index, koma) in komas.iter().enumerate() {
-                let position = index + 1;
-                if let Some((first_sheet, first_position)) =
-                    koma_locations.insert(&koma.id, (sheet_id, position))
-                {
-                    let location = |sheet: Option<&SheetId>, position| match sheet {
-                        Some(id) => format!("Sheet {id}, item {position}"),
-                        None => format!("Drawer, item {position}"),
-                    };
-                    return Err(format!(
-                        "Duplicate Koma ID {}: {} and {}",
-                        koma.id,
-                        location(first_sheet, first_position),
-                        location(sheet_id, position)
-                    ));
-                }
-            }
-        }
-
-        for sheet in &mut sheets {
-            sheet.focused_koma_id = sheet
-                .focused_koma_id
-                .take()
-                .filter(|id| sheet.komas.iter().any(|koma| &koma.id == id));
-        }
-        Ok(Self {
-            profile_id,
-            sheets,
-            active_sheet: active_sheet_index,
-            drawer,
-            ..Self::new()
-        })
-    }
-
     pub fn set_profile_id(&mut self, id: String) {
         for koma in self
             .sheets
@@ -246,102 +183,6 @@ impl WorkspaceState {
             koma.profile_id.clone_from(&id);
         }
         self.profile_id = id;
-    }
-
-    /// Two-Sheet fixture used by unit tests.
-    pub fn poc_default() -> Self {
-        let profile_id = "profile-a".to_string();
-        Self {
-            profile_id: profile_id.clone(),
-            is_private: false,
-            mode: InputMode::ContentInput,
-            active_sheet: 0,
-            next_koma_seq: 1,
-            next_sheet_seq: 3,
-            drawer: Vec::new(),
-            discarded_drawer: Vec::new(),
-            closed_komas: Vec::new(),
-            drawer_open: false,
-            drawer_selected: 0,
-            notifications: Vec::new(),
-            next_notification_seq: 1,
-            notifications_open: false,
-            notification_selected: 0,
-            recents: Vec::new(),
-            personal_presets: Vec::new(),
-            sheets: vec![
-                SheetState {
-                    id: "sheet-1".into(),
-                    label: "Sheet 1".into(),
-                    focused_koma_id: Some("sheet1-term".into()),
-                    komas: vec![
-                        KomaMeta {
-                            id: "sheet1-term".into(),
-                            sheet_id: Some("sheet-1".into()),
-                            profile_id: profile_id.clone(),
-                            kind: KomaKind::Terminal,
-                            label: "Shell 1".into(),
-                            initial_url: None,
-                            cwd: None,
-                            command: None,
-                            width: DEFAULT_KOMA_WIDTH,
-                            ratio: None,
-                            restore: None,
-                            koma_api_enabled: false,
-                        },
-                        KomaMeta {
-                            id: "sheet1-web".into(),
-                            sheet_id: Some("sheet-1".into()),
-                            profile_id: profile_id.clone(),
-                            kind: KomaKind::Web,
-                            label: "Makepad".into(),
-                            initial_url: Some("https://makepad.nl".into()),
-                            cwd: None,
-                            command: None,
-                            width: DEFAULT_KOMA_WIDTH,
-                            ratio: None,
-                            restore: None,
-                            koma_api_enabled: false,
-                        },
-                    ],
-                },
-                SheetState {
-                    id: "sheet-2".into(),
-                    label: "Sheet 2".into(),
-                    focused_koma_id: Some("sheet2-term".into()),
-                    komas: vec![
-                        KomaMeta {
-                            id: "sheet2-term".into(),
-                            sheet_id: Some("sheet-2".into()),
-                            profile_id: profile_id.clone(),
-                            kind: KomaKind::Terminal,
-                            label: "Shell 2".into(),
-                            initial_url: None,
-                            cwd: None,
-                            command: None,
-                            width: DEFAULT_KOMA_WIDTH,
-                            ratio: None,
-                            restore: None,
-                            koma_api_enabled: false,
-                        },
-                        KomaMeta {
-                            id: "sheet2-web".into(),
-                            sheet_id: Some("sheet-2".into()),
-                            profile_id,
-                            kind: KomaKind::Web,
-                            label: "Example".into(),
-                            initial_url: Some("https://example.com".into()),
-                            cwd: None,
-                            command: None,
-                            width: DEFAULT_KOMA_WIDTH,
-                            ratio: None,
-                            restore: None,
-                            koma_api_enabled: false,
-                        },
-                    ],
-                },
-            ],
-        }
     }
 
     pub fn sheets(&self) -> &[SheetState] {
@@ -798,43 +639,12 @@ impl WorkspaceState {
         None
     }
 
-    pub fn remove_focused_koma(&mut self) -> Option<KomaMeta> {
+    fn remove_focused_koma(&mut self) -> Option<KomaMeta> {
         let id = self.current_sheet().focused_koma_id.clone()?;
         self.remove_koma_by_id(&id)
     }
 
-    pub fn close_koma(&mut self, id: &KomaId, prefer_left: bool) -> Option<KomaMeta> {
-        let (index, koma) = self.take_koma(id, prefer_left)?;
-        if self.closed_komas.len() == MAX_CLOSED_KOMAS {
-            self.closed_komas.remove(0);
-        }
-        self.closed_komas.push((index, koma.clone()));
-        Some(koma)
-    }
-
-    pub fn reopen_closed_koma(&mut self) -> Option<KomaMeta> {
-        let (original_index, mut koma) = self.closed_komas.pop()?;
-        let origin = self
-            .sheets
-            .iter()
-            .position(|sheet| Some(&sheet.id) == koma.sheet_id.as_ref());
-        self.active_sheet = origin.unwrap_or(self.active_sheet);
-        let sheet = self.current_sheet_mut();
-        let index = if origin.is_some() {
-            original_index.min(sheet.komas.len())
-        } else {
-            sheet.focused_index().map_or(0, |index| index + 1)
-        };
-        koma.sheet_id = Some(sheet.id.clone());
-        if koma.kind == KomaKind::Terminal {
-            koma.command = None;
-        }
-        sheet.komas.insert(index, koma.clone());
-        sheet.focused_koma_id = Some(koma.id.clone());
-        Some(koma)
-    }
-
-    pub fn remove_koma_by_id(&mut self, koma_id: &KomaId) -> Option<KomaMeta> {
+    fn remove_koma_by_id(&mut self, koma_id: &KomaId) -> Option<KomaMeta> {
         self.take_koma(koma_id, false).map(|(_, koma)| koma)
     }
 
@@ -916,33 +726,6 @@ impl WorkspaceState {
         let removed = self.sheets.remove(self.active_sheet);
         self.active_sheet = self.active_sheet.min(self.sheets.len() - 1);
         Ok(removed)
-    }
-
-    pub fn record_recent(&mut self, input: impl Into<String>, label: impl Into<String>) {
-        if self.is_private {
-            return;
-        }
-        let input = input.into();
-        let trimmed = input.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        let trimmed_str = trimmed.to_string();
-        let label_str = label.into().trim().to_string();
-        let label_str = if label_str.is_empty() {
-            trimmed_str.clone()
-        } else {
-            label_str
-        };
-        self.recents.retain(|r| r.input != trimmed_str);
-        self.recents.insert(
-            0,
-            RecentEntry {
-                input: trimmed_str,
-                label: label_str,
-            },
-        );
-        self.recents.truncate(MAX_RECENTS);
     }
 
     pub fn update_koma_url(
@@ -1125,80 +908,6 @@ fn resolve_in_sheet(sheet: &SheetState, target_kind: KomaKind) -> Result<&KomaMe
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn reopens_explicitly_closed_komas_in_reverse_order_and_restores_focus() {
-        let mut state = WorkspaceState::poc_default();
-        let original = state.current_sheet().komas.clone();
-        let terminal = &original[0].id;
-        let web = &original[1].id;
-        let term = state.koma_by_id_mut(terminal).unwrap();
-        term.cwd = Some("/work".into());
-        term.command = Some("example-command".into());
-        state.close_koma(web, false).unwrap();
-        state.close_koma(terminal, false).unwrap();
-        state.remove_koma_by_id(&"sheet2-term".into()).unwrap();
-        state.switch_sheet(1);
-
-        let restored = state.reopen_closed_koma().unwrap();
-        assert_eq!(restored.id, *terminal);
-        assert_eq!(restored.cwd.as_deref(), Some("/work"));
-        assert_eq!(restored.command, None);
-        assert_eq!(state.active_sheet_index(), 0);
-        assert_eq!(state.focused_koma(), Some(&restored));
-
-        assert_eq!(state.reopen_closed_koma().as_ref(), Some(&original[1]));
-        assert_eq!(state.current_sheet().komas, [restored, original[1].clone()]);
-        assert_eq!(state.focused_koma().map(|koma| &koma.id), Some(web));
-        assert!(state.reopen_closed_koma().is_none());
-    }
-
-    #[test]
-    fn reopens_next_to_focus_when_the_original_sheet_was_removed() {
-        let mut state = WorkspaceState::poc_default();
-        let id = state.current_sheet().komas[0].id.clone();
-        state.close_koma(&id, false).unwrap();
-        state.remove_current_sheet().unwrap();
-        let target = state.current_sheet().id.clone();
-        let focused_id = state.focused_koma().unwrap().id.clone();
-        let restored = state.reopen_closed_koma().unwrap();
-        assert_eq!(restored.sheet_id, Some(target));
-        assert_eq!(state.current_sheet().komas[0].id, focused_id);
-        assert_eq!(state.current_sheet().komas[1].id, id);
-        assert_eq!(state.focused_koma(), Some(&restored));
-    }
-
-    #[test]
-    fn allocation_skips_the_id_of_a_closed_koma() {
-        let mut state = WorkspaceState::new();
-        let seq = state.next_koma_seq;
-        let closed =
-            state.insert_koma_after_focused(KomaKind::Terminal, "Closed".into(), None, None);
-        state.close_koma(&closed.id, false).unwrap();
-
-        state.next_koma_seq = seq;
-        let created = state.insert_koma_after_focused(KomaKind::Terminal, "New".into(), None, None);
-        assert_ne!(created.id, closed.id);
-        assert_eq!(state.reopen_closed_koma().unwrap().id, closed.id);
-    }
-
-    #[test]
-    fn restore_layout_requires_a_valid_active_sheet() {
-        assert!(WorkspaceState::restore_layout("profile-a".into(), Vec::new(), 0, vec![]).is_err());
-        let state = WorkspaceState::new();
-        assert!(
-            WorkspaceState::restore_layout("profile-a".into(), state.sheets, 1, vec![]).is_err()
-        );
-    }
-
-    #[test]
-    fn restore_layout_drops_a_stale_koma_focus() {
-        let mut sheets = WorkspaceState::poc_default().sheets;
-        sheets[1].focused_koma_id = Some("missing".into());
-        let state = WorkspaceState::restore_layout("profile-a".into(), sheets, 1, vec![]).unwrap();
-        assert_eq!(state.active_sheet_index(), 1);
-        assert_eq!(state.current_sheet().focused_koma_id, None);
-    }
 
     #[test]
     fn ambient_targeting_follows_caller_sheet() {
@@ -1441,29 +1150,6 @@ mod tests {
         assert!(state.sheets[0].komas.is_empty());
         assert_eq!(state.sheets[0].focused_koma_id, None);
         assert!(!state.move_koma_to_position(&"sheet1-web".into(), 99, 0));
-    }
-
-    #[test]
-    fn recents_dedup_cap_and_skip_when_private() {
-        let mut state = WorkspaceState::new();
-        for i in 0..(MAX_RECENTS + 3) {
-            state.record_recent(format!("https://ex{i}.com"), format!("Ex {i}"));
-        }
-        assert_eq!(state.recents.len(), MAX_RECENTS);
-        assert_eq!(
-            state.recents[0].input,
-            format!("https://ex{}.com", MAX_RECENTS + 2)
-        );
-
-        state.record_recent("https://ex5.com", "Ex 5 Updated");
-        assert_eq!(state.recents.len(), MAX_RECENTS);
-        assert_eq!(state.recents[0].input, "https://ex5.com");
-        assert_eq!(state.recents[0].label, "Ex 5 Updated");
-
-        let mut priv_state = WorkspaceState::new();
-        priv_state.is_private = true;
-        priv_state.record_recent("https://secret.example", "Secret");
-        assert!(priv_state.recents.is_empty());
     }
 
     #[test]
