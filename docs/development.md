@@ -32,10 +32,10 @@ Koma は [Makepad フォーク](https://github.com/tyPhoon-collab/makepad) の�
 Browser Host と CEF 取得ツールも同じコミットを参照し、Koma の `Cargo.lock` で解決します。
 `just setup` で取得した CEF は `local/cef-prebuilt/` に入ります。
 
-1. 上流のリリースタグを取得し、フォークの `koma/main` にマージして push します。
+1. 上流のリリースタグを取得し、フォークの `koma/main` にマージして push します。マージ後、フォーク側で IME 回帰テスト（`cargo test -p makepad-platform --lib hal_intake`、`cargo test -p makepad-hal --lib ime`）を実行します。
 2. Koma の `[workspace.dependencies]` にある Makepad の `rev` を揃え、`cargo metadata --format-version 1` でロックファイルを更新します。
 3. macOS・Windows・Linux で `just build`、`just check`、`just test` を実行します。
-4. `just setup` と `just private` で、同梱 Host による Web 表示、Profile 分離、Terminal の入力を確認します。
+4. `just setup` と `just private` で、同梱 Host による Web 表示、Profile 分離、Terminal・Palette での日本語 IME 変換確定を確認します。
 
 Makepad 側の独自変更は、同時に更新が必要なクレートを1コミットにまとめます。
 上流を取り込んだマージコミットと、Koma の固定先を更新する変更を履歴に残します。

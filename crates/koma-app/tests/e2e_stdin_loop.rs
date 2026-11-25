@@ -260,6 +260,101 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
     }
     assert!(got_ime_text, "Committed IME text did not reach MpTerm PTY");
 
+    // Rename the focused Koma via Palette using two consecutive IME commits, verifying
+    // TextInput exits composition on commit instead of overwriting the previous commit.
+    send_batch(
+        &sender,
+        vec![
+            StudioToApp::KeyDown(KeyEvent {
+                key_code: KeyCode::Comma,
+                modifiers: KeyModifiers {
+                    control: true,
+                    ..Default::default()
+                },
+                is_repeat: false,
+                time: 1.10,
+            }),
+            StudioToApp::KeyDown(KeyEvent {
+                key_code: KeyCode::KeyR,
+                modifiers: KeyModifiers::default(),
+                is_repeat: false,
+                time: 1.12,
+            }),
+            StudioToApp::KeyUp(KeyEvent {
+                key_code: KeyCode::KeyR,
+                modifiers: KeyModifiers::default(),
+                is_repeat: false,
+                time: 1.13,
+            }),
+            StudioToApp::Tick,
+        ],
+    );
+    for _ in 0..4 {
+        std::thread::sleep(Duration::from_millis(25));
+        send_batch(&sender, vec![StudioToApp::Tick]);
+        while hub.rx.try_recv().is_ok() {}
+    }
+    send_batch(
+        &sender,
+        vec![
+            StudioToApp::TextInput(TextInputEvent {
+                input: "にほんご".into(),
+                replace_last: true,
+                was_paste: false,
+                ..Default::default()
+            }),
+            StudioToApp::TextInput(TextInputEvent {
+                input: "日本語".into(),
+                replace_last: false,
+                was_paste: false,
+                ..Default::default()
+            }),
+            StudioToApp::TextInput(TextInputEvent {
+                input: "こま".into(),
+                replace_last: true,
+                was_paste: false,
+                ..Default::default()
+            }),
+            StudioToApp::TextInput(TextInputEvent {
+                input: "コマ".into(),
+                replace_last: false,
+                was_paste: false,
+                ..Default::default()
+            }),
+            StudioToApp::KeyDown(KeyEvent {
+                key_code: KeyCode::ReturnKey,
+                modifiers: KeyModifiers::default(),
+                is_repeat: false,
+                time: 1.15,
+            }),
+            StudioToApp::Tick,
+        ],
+    );
+
+    let mut renamed_via_ime = false;
+    while Instant::now() < deadline {
+        send_batch(&sender, vec![StudioToApp::Tick]);
+        while hub.rx.try_recv().is_ok() {}
+        if let Ok(res) = send_request(
+            &sock_str,
+            &IpcRequest::new(IpcCommand::Koma(KomaCommand::List(KomaListArgs {
+                sheet_id: None,
+            }))),
+        ) {
+            if let Ok(IpcPayload::KomaList { komas, .. }) = res.into_result() {
+                if komas.iter().any(|k| k.label == "日本語コマ") {
+                    renamed_via_ime = true;
+                    break;
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        renamed_via_ime,
+        "Consecutive IME commits in Palette did not rename focused Koma"
+    );
+
     // Stow the new Terminal Koma to Drawer via Ctrl+, then 'a'.
     send_batch(
         &sender,
