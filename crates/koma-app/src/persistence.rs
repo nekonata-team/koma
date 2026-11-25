@@ -1,6 +1,6 @@
 //! Profile state saved as JSON under `~/.local/state/koma/` (UI-independent).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use makepad_micro_serde::*;
 
@@ -8,6 +8,7 @@ use koma_core::model::{
     KomaId, KomaKind, KomaMeta, PersonalSheetPreset, RecentEntry, SheetId, SheetState,
     WorkspaceState, MAX_KOMA_WIDTH, MIN_KOMA_WIDTH,
 };
+pub use koma_ipc::workspaces::state_dir;
 
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
 struct SavedKoma {
@@ -197,14 +198,6 @@ pub fn from_json(text: &str) -> Result<WorkspaceState, String> {
     Ok(state)
 }
 
-/// `$KOMA_STATE_DIR`, else `~/.local/state/koma`.
-pub fn state_dir(home: Option<&str>) -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("KOMA_STATE_DIR").filter(|d| !d.is_empty()) {
-        return Some(PathBuf::from(dir));
-    }
-    home.map(|h| Path::new(h).join(".local/state/koma"))
-}
-
 /// Loads `state.json`; a missing file yields `None`. A corrupt file is moved to
 /// `state.json.corrupt-<timestamp>` and reported as `Err` so the caller can start fresh.
 pub fn load(dir: &Path) -> Result<Option<WorkspaceState>, String> {
@@ -240,6 +233,7 @@ pub fn save(dir: &Path, state: &WorkspaceState) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("koma-{name}-{}", std::process::id()));

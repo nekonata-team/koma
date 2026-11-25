@@ -196,12 +196,20 @@ pub enum NotificationCommand {
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
 pub enum WorkspaceCommand {
     Health,
+    Inspect,
     Private,
     ProfileList,
     ProfileNew { id: String },
     ProfileOpen { id: String },
     ProfileActivate { id: String },
     SettingsReload,
+}
+
+#[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
+pub struct WorkspaceEndpoint {
+    pub id: String,
+    pub is_private: bool,
+    pub socket: String,
 }
 
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
@@ -289,6 +297,7 @@ pub struct WebReadData {
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
 pub enum IpcPayload {
     Ack,
+    WorkspaceEndpoint(WorkspaceEndpoint),
     ProfileList {
         profiles: Vec<String>,
     },

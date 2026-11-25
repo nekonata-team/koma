@@ -59,26 +59,39 @@ fn round_trip_stream<S: Read + Write>(
         .map_err(|e| format!("Invalid IPC response JSON: {e:?}"))
 }
 
-#[cfg(unix)]
 pub fn send_request(socket_path: &str, req: &IpcRequest) -> Result<IpcResponse, String> {
+    send_request_with_timeout(socket_path, req, Duration::from_secs(10))
+}
+
+#[cfg(unix)]
+pub fn send_request_with_timeout(
+    socket_path: &str,
+    req: &IpcRequest,
+    timeout: Duration,
+) -> Result<IpcResponse, String> {
     use std::os::unix::net::UnixStream;
 
     let stream = UnixStream::connect(socket_path)
         .map_err(|e| format!("Failed to connect to {socket_path}: {e}"))?;
-    let timeout = Duration::from_secs(10);
     let _ = stream.set_read_timeout(Some(timeout));
     let _ = stream.set_write_timeout(Some(timeout));
     round_trip_stream(stream, req)
 }
 
 #[cfg(not(unix))]
-pub fn send_request(socket_path: &str, req: &IpcRequest) -> Result<IpcResponse, String> {
-    send_request_via_port_file(socket_path, req)
-}
+pub use send_request_via_port_file_with_timeout as send_request_with_timeout;
 
 pub fn send_request_via_port_file(
     port_file: &str,
     req: &IpcRequest,
+) -> Result<IpcResponse, String> {
+    send_request_via_port_file_with_timeout(port_file, req, Duration::from_secs(10))
+}
+
+pub fn send_request_via_port_file_with_timeout(
+    port_file: &str,
+    req: &IpcRequest,
+    timeout: Duration,
 ) -> Result<IpcResponse, String> {
     let port_str = std::fs::read_to_string(port_file)
         .map_err(|e| format!("Failed to read IPC port file {port_file}: {e}"))?;
@@ -86,9 +99,8 @@ pub fn send_request_via_port_file(
         .trim()
         .parse()
         .map_err(|_| format!("Invalid IPC port in {port_file}"))?;
-    let stream = TcpStream::connect(("127.0.0.1", port))
+    let stream = TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), timeout)
         .map_err(|e| format!("Failed to connect to 127.0.0.1:{port}: {e}"))?;
-    let timeout = Duration::from_secs(10);
     let _ = stream.set_read_timeout(Some(timeout));
     let _ = stream.set_write_timeout(Some(timeout));
     round_trip_stream(stream, req)

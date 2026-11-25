@@ -135,7 +135,10 @@ impl App {
                 None => (profiles::process_socket("private"), false),
             },
         };
-        self.sock_path = socket;
+        self.sock_path = std::path::absolute(&socket)
+            .unwrap_or_else(|err| startup_error(format!("Could not resolve {socket}: {err}")))
+            .display()
+            .to_string();
         self.ipc = Some(
             IpcServer::start(self.sock_path.clone(), shared_endpoint)
                 .unwrap_or_else(|err| startup_error(err)),
@@ -230,6 +233,14 @@ impl App {
         self.sync_strip(cx, true);
         self.apply_focus(cx);
         self.update_status(cx);
+        if let Some(ipc) = self.ipc.as_mut().filter(|_| self.is_private) {
+            if let Err(err) = ipc.publish_private_endpoint(&self.state.profile_id) {
+                eprintln!("[koma:ipc] {err}");
+                if startup_err.is_none() {
+                    startup_err = Some(err);
+                }
+            }
+        }
         if let Some(err) = startup_err {
             self.show_toast(cx, err);
         }

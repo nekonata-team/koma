@@ -11,6 +11,7 @@ use makepad_micro_serde::SerJson;
 
 mod args;
 mod web_script;
+mod workspace;
 
 use args::Args;
 
@@ -88,11 +89,19 @@ fn run(args: Args) -> Result<(), String> {
     if let Some(path_only) = args.settings_path_only() {
         return run_settings(path_only, json);
     }
+    if args.lists_workspaces() {
+        return workspace::list(json);
+    }
     let sock = resolve_socket_path(args.socket.as_deref());
+    let is_remote = args.socket.is_some() && sock != resolve_socket_path(None);
     let script = args
         .web_script()
         .map(|(path, timeout)| (path.to_path_buf(), timeout));
-    let req = args.into_request();
+    let mut req = args.into_request();
+    if is_remote {
+        req.caller_koma_id = None;
+        req.profile_id = None;
+    }
     let is_health = matches!(req.command, IpcCommand::Workspace(WorkspaceCommand::Health));
     let resp = send_request(&sock, &req)?;
     if let Some((file, timeout)) = script {
@@ -120,6 +129,7 @@ fn run(args: Args) -> Result<(), String> {
                 println!("{id}");
             }
         }
+        IpcPayload::WorkspaceEndpoint(_) => return Err("Unexpected Workspace endpoint".into()),
         IpcPayload::Overview { sheets } => {
             for sheet in sheets {
                 let mark = if sheet.is_active { "*" } else { " " };

@@ -1,6 +1,6 @@
 //! Background Unix Domain Socket IPC server waking the Makepad UI thread via `SignalToUI`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 
@@ -18,6 +18,7 @@ pub struct IpcServer {
     socket_path: String,
     stop: Arc<AtomicBool>,
     _endpoint_lock: Option<std::fs::File>,
+    private_marker: Option<PathBuf>,
 }
 
 impl IpcServer {
@@ -121,7 +122,22 @@ impl IpcServer {
             socket_path,
             stop,
             _endpoint_lock: endpoint_lock,
+            private_marker: None,
         })
+    }
+
+    pub fn publish_private_endpoint(&mut self, id: &str) -> Result<(), String> {
+        use koma_ipc::workspaces::{state_root, PRIVATE_ENDPOINTS};
+
+        let dir = state_root()?.join(PRIVATE_ENDPOINTS);
+        let marker = dir.join(id);
+        let temp = marker.with_extension("tmp");
+        std::fs::create_dir_all(&dir)
+            .and_then(|()| std::fs::write(&temp, &self.socket_path))
+            .and_then(|()| std::fs::rename(&temp, &marker))
+            .map_err(|err| format!("Could not publish {}: {err}", marker.display()))?;
+        self.private_marker = Some(marker);
+        Ok(())
     }
 
     pub fn try_recv(&self) -> Option<PendingIpc> {
@@ -171,6 +187,9 @@ fn handle_client<R: std::io::Read, W: std::io::Write>(
 impl Drop for IpcServer {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        if let Some(marker) = &self.private_marker {
+            let _ = std::fs::remove_file(marker);
+        }
         let _ = std::fs::remove_file(&self.socket_path);
     }
 }

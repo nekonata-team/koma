@@ -11,7 +11,7 @@ Koma は、ターミナル作業とライブ Web 閲覧を同じ空間に統合�
 _Avoid_: Account, Login
 
 **Workspace**:
-1 つの Profile に属するすべての Sheet と Drawer を束ねる最上位の作業空間。
+すべての Sheet と Drawer を束ねる最上位の作業空間。
 _Avoid_: Den, Space, Studio
 
 **Private Workspace**:

@@ -59,6 +59,9 @@ enum Command {
     Health,
     /// Open a Private Workspace.
     Private,
+    /// Discover running Workspaces.
+    #[command(subcommand)]
+    Workspace(Workspace),
     /// List, create, or switch Profiles.
     #[command(subcommand)]
     Profile(Profile),
@@ -152,6 +155,12 @@ enum Profile {
     List,
     New { name: String },
     Open { name: String },
+}
+
+#[derive(Debug, Subcommand)]
+enum Workspace {
+    /// List running Workspaces and their IPC endpoints.
+    List,
 }
 
 #[derive(Debug, Subcommand)]
@@ -378,10 +387,15 @@ impl Args {
         }
     }
 
+    pub(super) fn lists_workspaces(&self) -> bool {
+        matches!(self.command, Command::Workspace(Workspace::List))
+    }
+
     pub(super) fn into_request(self) -> IpcRequest {
         let command = match self.command {
             Command::Health => IpcCommand::Workspace(WorkspaceCommand::Health),
             Command::Private => IpcCommand::Workspace(WorkspaceCommand::Private),
+            Command::Workspace(Workspace::List) => unreachable!("workspace list is local"),
             Command::Profile(Profile::List) => IpcCommand::Workspace(WorkspaceCommand::ProfileList),
             Command::Profile(Profile::New { name }) => {
                 IpcCommand::Workspace(WorkspaceCommand::ProfileNew { id: name })

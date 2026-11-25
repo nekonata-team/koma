@@ -105,6 +105,9 @@ Koma Mode の `y` でその端末を複製すると、使用中の名前を避�
 
 CLI を PATH に置いている場合は、アプリの起動中に `koma` コマンドを使えます。
 `koma profile list` で Profile を一覧表示し、`koma profile open work` で既存の `work` を開けます。
+`koma workspace list` は、接続できる Workspace とそのソケットパスを一覧表示します。
+Private Workspace も個別に表示されます。選んだパスを `koma --socket "$socket" sheet list` のように渡すと、その Workspace を操作できます。
+スクリプトでは `koma workspace list --json` の `workspaces` 配列から `id`、`is_private`、`socket` を取得できます。
 コマンドの一覧は `koma --help`、個別の使い方は `koma web script --help` のように確認できます。
 
 ### Web Koma のスクリプト実行

@@ -13,7 +13,7 @@ use koma_ipc::protocol::{
     NotificationCommand, NotificationSendArgs, NotificationSummary, PresetSummary, SheetCommand,
     SheetListEntry, SheetSummary, TerminalCommand, TerminalNewArgs, TerminalTextArgs, WebClickArgs,
     WebCommand, WebEvalArgs, WebFillArgs, WebKomaData, WebReadArgs, WebReloadArgs,
-    WorkspaceCommand,
+    WorkspaceCommand, WorkspaceEndpoint,
 };
 use makepad_app_terminal::widget::MpTerm;
 use makepad_widgets::*;
@@ -676,6 +676,15 @@ impl App {
         match cmd {
             WorkspaceCommand::Health => {
                 let _ = reply.send(IpcResponse::ok());
+            }
+            WorkspaceCommand::Inspect => {
+                let _ = reply.send(IpcResponse::Ok(IpcPayload::WorkspaceEndpoint(
+                    WorkspaceEndpoint {
+                        id: self.state.profile_id.clone(),
+                        is_private: self.is_private,
+                        socket: self.sock_path.clone(),
+                    },
+                )));
             }
             WorkspaceCommand::ProfileList => {
                 send_result(

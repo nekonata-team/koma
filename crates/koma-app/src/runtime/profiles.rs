@@ -2,7 +2,6 @@ use std::fs::{self, File, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use koma_app::persistence;
 use koma_ipc::protocol::{IpcCommand, IpcRequest, WorkspaceCommand};
 use koma_ipc::transport::send_request;
 
@@ -15,9 +14,7 @@ pub fn home() -> Option<String> {
 }
 
 pub fn root() -> Result<PathBuf, String> {
-    let dir = persistence::state_dir(home().as_deref())
-        .ok_or("Set HOME, USERPROFILE, or KOMA_STATE_DIR to use Profiles")?;
-    std::path::absolute(&dir).map_err(|e| format!("Could not resolve {}: {e}", dir.display()))
+    koma_ipc::workspaces::state_root()
 }
 
 fn profile_id(raw: &str) -> Result<String, String> {
