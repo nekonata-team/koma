@@ -58,15 +58,28 @@ pub struct OverlayList {
     reveal_selected: bool,
 }
 
-fn next_first_id(selected: usize, first_id: usize, visible_items: usize) -> Option<usize> {
+const SCROLLOFF_ROWS: usize = 1;
+
+fn next_first_id(
+    selected: usize,
+    first_id: usize,
+    visible_items: usize,
+    len: usize,
+) -> Option<usize> {
     let full_rows = visible_items.saturating_sub(1).max(1);
-    if selected < first_id {
-        Some(selected)
-    } else if selected >= first_id.saturating_add(full_rows) {
-        Some(selected.saturating_sub(full_rows - 1))
+    let max_first = len.saturating_sub(full_rows);
+    let margin = SCROLLOFF_ROWS.min(full_rows.saturating_sub(1) / 2);
+    let target = if selected < first_id.saturating_add(margin) {
+        selected.saturating_sub(margin)
+    } else if selected.saturating_add(margin) >= first_id.saturating_add(full_rows) {
+        selected
+            .saturating_add(margin + 1)
+            .saturating_sub(full_rows)
     } else {
-        None
-    }
+        return None;
+    };
+    let clamped = target.min(max_first);
+    (clamped != first_id).then_some(clamped)
 }
 
 impl Widget for OverlayList {
@@ -104,9 +117,12 @@ impl Widget for OverlayList {
             list.set_item_range(cx, 0, self.items.len());
             if self.reveal_selected {
                 self.reveal_selected = false;
-                if let Some(next_first) =
-                    next_first_id(self.selected, list.first_id(), list.visible_items())
-                {
+                if let Some(next_first) = next_first_id(
+                    self.selected,
+                    list.first_id(),
+                    list.visible_items(),
+                    self.items.len(),
+                ) {
                     list.set_first_id_and_scroll(next_first, 0.0);
                 }
             }
@@ -154,12 +170,15 @@ mod tests {
     use super::next_first_id;
 
     #[test]
-    fn reveals_selected_row_only_when_outside_visible_window() {
-        assert_eq!(next_first_id(0, 0, 8), None);
-        assert_eq!(next_first_id(6, 0, 8), None);
-        assert_eq!(next_first_id(7, 0, 8), Some(1));
-        assert_eq!(next_first_id(9, 2, 8), Some(3));
-        assert_eq!(next_first_id(0, 3, 8), Some(0));
-        assert_eq!(next_first_id(2, 0, 0), Some(2));
+    fn reveals_selected_row_with_scrolloff_and_edge_clamping() {
+        assert_eq!(next_first_id(0, 0, 8, 10), None);
+        assert_eq!(next_first_id(5, 0, 8, 10), None);
+        assert_eq!(next_first_id(6, 0, 8, 10), Some(1));
+        assert_eq!(next_first_id(8, 2, 8, 10), Some(3));
+        assert_eq!(next_first_id(9, 3, 8, 10), None);
+        assert_eq!(next_first_id(3, 3, 8, 10), Some(2));
+        assert_eq!(next_first_id(0, 3, 8, 10), Some(0));
+        assert_eq!(next_first_id(4, 0, 8, 5), None);
+        assert_eq!(next_first_id(2, 0, 0, 10), Some(2));
     }
 }
