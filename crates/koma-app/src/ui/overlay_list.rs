@@ -54,6 +54,19 @@ pub struct OverlayList {
     items: Vec<OverlayListItem>,
     #[rust]
     selected: usize,
+    #[rust]
+    reveal_selected: bool,
+}
+
+fn next_first_id(selected: usize, first_id: usize, visible_items: usize) -> Option<usize> {
+    let full_rows = visible_items.saturating_sub(1).max(1);
+    if selected < first_id {
+        Some(selected)
+    } else if selected >= first_id.saturating_add(full_rows) {
+        Some(selected.saturating_sub(full_rows - 1))
+    } else {
+        None
+    }
 }
 
 impl Widget for OverlayList {
@@ -89,6 +102,14 @@ impl Widget for OverlayList {
                 continue;
             }
             list.set_item_range(cx, 0, self.items.len());
+            if self.reveal_selected {
+                self.reveal_selected = false;
+                if let Some(next_first) =
+                    next_first_id(self.selected, list.first_id(), list.visible_items())
+                {
+                    list.set_first_id_and_scroll(next_first, 0.0);
+                }
+            }
             while let Some(row) = list.next_visible_item(cx) {
                 let Some(entry) = self.items.get(row) else {
                     continue;
@@ -110,9 +131,12 @@ impl OverlayListRef {
         let Some(mut inner) = self.borrow_mut() else {
             return;
         };
-        inner.items = items;
-        inner.selected = selected;
-        inner.view.redraw(cx);
+        if inner.items != items || inner.selected != selected {
+            inner.items = items;
+            inner.selected = selected;
+            inner.reveal_selected = true;
+            inner.view.redraw(cx);
+        }
     }
 
     pub fn clicked(&self, actions: &Actions) -> Option<usize> {
@@ -122,5 +146,20 @@ impl OverlayListRef {
                 OverlayListAction::Clicked(row) => Some(row),
                 OverlayListAction::None => None,
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_first_id;
+
+    #[test]
+    fn reveals_selected_row_only_when_outside_visible_window() {
+        assert_eq!(next_first_id(0, 0, 8), None);
+        assert_eq!(next_first_id(6, 0, 8), None);
+        assert_eq!(next_first_id(7, 0, 8), Some(1));
+        assert_eq!(next_first_id(9, 2, 8), Some(3));
+        assert_eq!(next_first_id(0, 3, 8), Some(0));
+        assert_eq!(next_first_id(2, 0, 0), Some(2));
     }
 }

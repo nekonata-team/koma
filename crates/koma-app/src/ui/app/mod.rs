@@ -103,10 +103,10 @@ script_mod! {
                                 }
                             }
 
-                            palette_candidates := Label{
+                            palette_candidates := OverlayList{
+                                visible: false
                                 width: Fill
-                                text: ""
-                                draw_text.color: theme.color_on_surface_variant
+                                height: 260
                             }
                         }
                     }

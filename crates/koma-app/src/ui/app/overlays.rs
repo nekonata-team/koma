@@ -208,23 +208,21 @@ impl App {
     }
 
     pub(super) fn render_palette_candidates(&self, cx: &mut Cx) {
-        let text = self
+        let list = self.ui.overlay_list(cx, ids!(palette_candidates));
+        let has_items = !self.palette_items.is_empty();
+        list.set_visible(cx, has_items);
+        if !has_items {
+            return;
+        }
+        let items = self
             .palette_items
             .iter()
-            .enumerate()
-            .map(|(i, item)| {
-                let prefix = if i == self.palette_selected {
-                    "▸ "
-                } else {
-                    "  "
-                };
-                format!("{prefix}{}", item.label)
+            .map(|item| OverlayListItem {
+                primary: item.label.clone(),
+                trailing: String::new(),
             })
-            .collect::<Vec<_>>()
-            .join("\n");
-        self.ui
-            .label(cx, ids!(palette_candidates))
-            .set_text(cx, &text);
+            .collect();
+        list.set_items(cx, items, self.palette_selected);
     }
 
     pub(super) fn open_prompt(&mut self, cx: &mut Cx, mode: PromptMode) {

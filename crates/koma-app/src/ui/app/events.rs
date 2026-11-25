@@ -88,6 +88,18 @@ impl App {
         if let Some(text) = prompt_input.changed(actions) {
             self.refresh_palette_candidates(cx, &text);
         }
+        if let Some(row) = self
+            .ui
+            .overlay_list(cx, ids!(palette_candidates))
+            .clicked(actions)
+        {
+            if row < self.palette_items.len() {
+                self.palette_selected = row;
+                let text = prompt_input.text();
+                self.submit_prompt(cx, &text);
+                return;
+            }
+        }
         if let Some((text, _)) = prompt_input.returned(actions) {
             self.submit_prompt(cx, &text);
         } else if prompt_input.escaped(actions) {
