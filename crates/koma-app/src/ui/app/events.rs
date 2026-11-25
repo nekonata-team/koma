@@ -9,6 +9,7 @@ use makepad_widgets::makepad_platform::file_dialogs::FileDialogAction;
 use makepad_widgets::*;
 
 use crate::runtime::web_views::KomaApiEvent;
+use crate::ui::notifications_list::{self, NotificationsListWidgetRefExt};
 use crate::ui::sheet_strip::{self, SheetStripAction};
 use crate::ui::web_koma::{self, WebKomaAction};
 
@@ -450,6 +451,22 @@ impl MatchEvent for App {
         self.handle_dialog_actions(cx, actions);
         self.handle_prompt_actions(cx, actions);
 
+        if let Some(row) = self
+            .ui
+            .notifications_list(cx, ids!(notifications_list))
+            .clicked(actions)
+        {
+            if let Some(id) = self.state.notifications.get(row).map(|n| n.id.clone()) {
+                match self.state.focus_notification_source(Some(&id)) {
+                    Ok(_) => {
+                        self.state.mode = InputMode::ContentInput;
+                        self.sync_after_mutation(cx, true);
+                    }
+                    Err(err) => self.show_toast(cx, err),
+                }
+            }
+        }
+
         if let Some(sheet_live_id) = self.ui.line_menu(cx, ids!(sheet_line_menu)).jumped(actions) {
             if let Some(idx) = self
                 .state
@@ -519,6 +536,7 @@ impl AppMain for App {
         makepad_app_terminal::widget::script_mod(vm);
         web_koma::script_mod(vm);
         sheet_strip::script_mod(vm);
+        notifications_list::script_mod(vm);
         super::script_mod(vm)
     }
 

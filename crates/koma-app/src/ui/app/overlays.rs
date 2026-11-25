@@ -6,6 +6,7 @@ use koma_core::model::{InputMode, KomaKind, KomaMeta, NotificationEntry};
 use makepad_widgets::*;
 
 use crate::runtime::profiles::{self, Profile};
+use crate::ui::notifications_list::NotificationsListWidgetRefExt;
 
 use super::{App, PromptMode};
 
@@ -145,28 +146,13 @@ impl App {
         if !self.state.notifications_open {
             return;
         }
-        let body = if self.state.notifications.is_empty() {
-            "(no notifications)".to_string()
-        } else {
-            self.state
-                .notifications
-                .iter()
-                .enumerate()
-                .map(|(i, n)| {
-                    let prefix = if i == self.state.notification_selected {
-                        "▸ "
-                    } else {
-                        "  "
-                    };
-                    let mark = if n.unread { "*" } else { " " };
-                    format!("{prefix}{mark} [{}] {}: {}", n.koma_id, n.title, n.body)
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
         self.ui
-            .label(cx, ids!(notifications_list))
-            .set_text(cx, &body);
+            .notifications_list(cx, ids!(notifications_list))
+            .set_entries(
+                cx,
+                self.state.notifications.clone(),
+                self.state.notification_selected,
+            );
     }
 
     pub(super) fn toggle_drawer(&mut self, cx: &mut Cx) {

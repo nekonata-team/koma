@@ -165,10 +165,9 @@ script_mod! {
                                 draw_text.color: theme.color_primary
                             }
 
-                            notifications_list := Label{
+                            notifications_list := NotificationsList{
                                 width: Fill
-                                text: "(no notifications)"
-                                draw_text.color: theme.color_on_surface
+                                height: 260
                             }
                         }
                     }
