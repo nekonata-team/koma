@@ -6,7 +6,7 @@ use koma_core::model::{InputMode, KomaKind, KomaMeta, NotificationEntry};
 use makepad_widgets::*;
 
 use crate::runtime::profiles::{self, Profile};
-use crate::ui::notifications_list::NotificationsListWidgetRefExt;
+use crate::ui::overlay_list::{OverlayListItem, OverlayListWidgetRefExt};
 
 use super::{App, PromptMode};
 
@@ -98,45 +98,32 @@ impl App {
         if !self.state.drawer_open {
             return;
         }
-        let body = if self.state.drawer.is_empty() {
-            "(drawer is empty — press 'a' in Koma Mode to stow focused koma)".to_string()
-        } else {
-            self.state
-                .drawer
-                .iter()
-                .enumerate()
-                .map(|(i, item)| {
-                    let prefix = if i == self.state.drawer_selected {
-                        "▸ "
-                    } else {
-                        "  "
-                    };
-                    let detail = item
-                        .initial_url
-                        .as_deref()
-                        .or(item.cwd.as_deref())
-                        .unwrap_or("");
-                    if detail.is_empty() {
-                        format!(
-                            "{prefix}[{}] {} ({})",
-                            item.kind.as_str(),
-                            item.label,
-                            item.id
-                        )
-                    } else {
-                        format!(
-                            "{prefix}[{}] {} — {} ({})",
-                            item.kind.as_str(),
-                            item.label,
-                            detail,
-                            item.id
-                        )
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        self.ui.label(cx, ids!(drawer_list)).set_text(cx, &body);
+        let items = self
+            .state
+            .drawer
+            .iter()
+            .map(|item| {
+                let detail = item
+                    .initial_url
+                    .as_deref()
+                    .or(item.cwd.as_deref())
+                    .unwrap_or("");
+                let primary = if detail.is_empty() {
+                    format!("[{}] {}", item.kind.as_str(), item.label)
+                } else {
+                    format!("[{}] {} — {}", item.kind.as_str(), item.label, detail)
+                };
+                OverlayListItem {
+                    primary,
+                    trailing: item.id.as_str().to_string(),
+                }
+            })
+            .collect();
+        self.ui.overlay_list(cx, ids!(drawer_list)).set_items(
+            cx,
+            items,
+            self.state.drawer_selected,
+        );
     }
 
     pub(super) fn render_notifications_overlay(&self, cx: &mut Cx) {
@@ -146,13 +133,27 @@ impl App {
         if !self.state.notifications_open {
             return;
         }
+        let items = self
+            .state
+            .notifications
+            .iter()
+            .map(|entry| {
+                let mark = if entry.unread { "● " } else { "" };
+                let primary = match (entry.title.is_empty(), entry.body.is_empty()) {
+                    (false, false) => format!("{mark}{} — {}", entry.title, entry.body),
+                    (false, true) => format!("{mark}{}", entry.title),
+                    (true, false) => format!("{mark}{}", entry.body),
+                    (true, true) => format!("{mark}[{}]", entry.koma_id),
+                };
+                OverlayListItem {
+                    primary,
+                    trailing: entry.koma_id.as_str().to_string(),
+                }
+            })
+            .collect();
         self.ui
-            .notifications_list(cx, ids!(notifications_list))
-            .set_entries(
-                cx,
-                self.state.notifications.clone(),
-                self.state.notification_selected,
-            );
+            .overlay_list(cx, ids!(notifications_list))
+            .set_items(cx, items, self.state.notification_selected);
     }
 
     pub(super) fn toggle_drawer(&mut self, cx: &mut Cx) {

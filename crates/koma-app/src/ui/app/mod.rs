@@ -134,10 +134,10 @@ script_mod! {
                                 draw_text.color: theme.color_primary
                             }
 
-                            drawer_list := Label{
+                            drawer_list := OverlayList{
                                 width: Fill
-                                text: "(empty)"
-                                draw_text.color: theme.color_on_surface
+                                height: 260
+                                empty_text: "(drawer is empty — press 'a' in Koma Mode to stow focused koma)"
                             }
                         }
                     }
@@ -165,9 +165,10 @@ script_mod! {
                                 draw_text.color: theme.color_primary
                             }
 
-                            notifications_list := NotificationsList{
+                            notifications_list := OverlayList{
                                 width: Fill
                                 height: 260
+                                empty_text: "(no notifications)"
                             }
                         }
                     }
