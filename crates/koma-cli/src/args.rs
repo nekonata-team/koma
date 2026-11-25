@@ -8,6 +8,33 @@ use koma_ipc::protocol::{
     WebFillArgs, WebReadArgs, WebReloadArgs,
 };
 
+fn parse_non_empty(raw: &str) -> Result<String, String> {
+    if raw.trim().is_empty() {
+        Err("must not be empty".into())
+    } else {
+        Ok(raw.to_owned())
+    }
+}
+
+#[derive(Debug, clap::Args)]
+struct RequiredKoma {
+    /// Target a specific Koma.
+    #[arg(
+        long,
+        value_name = "ID",
+        allow_hyphen_values = true,
+        value_parser = parse_non_empty
+    )]
+    koma: String,
+}
+
+#[derive(Debug, clap::Args)]
+struct OptionalKoma {
+    /// Target a specific Koma.
+    #[arg(long, value_name = "ID", allow_hyphen_values = true)]
+    koma: Option<String>,
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "koma",
@@ -21,28 +48,6 @@ pub(super) struct Args {
     /// Print JSON (also the default when stdout is not a terminal).
     #[arg(long, global = true)]
     pub(super) json: bool,
-    /// Target a specific Koma.
-    #[arg(long, global = true, value_name = "ID", allow_hyphen_values = true)]
-    koma: Option<String>,
-    // Keep existing options available before and after subcommands.
-    /// Limit the number of lines returned by `koma terminal text`.
-    #[arg(long, global = true)]
-    lines: Option<NonZeroUsize>,
-    /// Limit `koma web read` to a selector or element reference.
-    #[arg(long, global = true, allow_hyphen_values = true)]
-    within: Option<String>,
-    /// Set the title for `drawer keep` or `notification send`.
-    #[arg(long, global = true, allow_hyphen_values = true)]
-    title: Option<String>,
-    /// List only unread Notifications.
-    #[arg(long, global = true)]
-    unread: bool,
-    /// Enable KomaAPI for the Web Koma.
-    #[arg(long, global = true, conflicts_with = "no_koma_api")]
-    koma_api: bool,
-    /// Disable KomaAPI for the Web Koma.
-    #[arg(long, global = true)]
-    no_koma_api: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -75,11 +80,19 @@ enum Command {
     /// Show the focused Koma on the active Sheet.
     Focused,
     /// Check whether --koma exists on any Sheet in the Workspace.
-    Exists,
+    Exists {
+        #[command(flatten)]
+        target: RequiredKoma,
+    },
     /// Focus --koma, switching Sheets if needed.
-    Focus,
+    Focus {
+        #[command(flatten)]
+        target: RequiredKoma,
+    },
     /// Move --koma to a specific position.
     Move {
+        #[command(flatten)]
+        target: RequiredKoma,
         #[arg(long, value_name = "KOMA_ID", group = "placement")]
         left_of: Option<String>,
         #[arg(long, value_name = "KOMA_ID", group = "placement")]
@@ -89,11 +102,16 @@ enum Command {
     },
     /// Set the fixed width of --koma in points.
     Resize {
+        #[command(flatten)]
+        target: RequiredKoma,
         #[arg(long)]
         width: f64,
     },
     /// Close --koma.
-    Close,
+    Close {
+        #[command(flatten)]
+        target: RequiredKoma,
+    },
     #[command(subcommand)]
     Web(Web),
     #[command(subcommand)]
@@ -162,32 +180,69 @@ enum Preset {
 enum Web {
     New {
         url: String,
+        /// Enable KomaAPI for the Web Koma.
+        #[arg(long)]
+        koma_api: bool,
     },
-    Url,
+    Url {
+        #[command(flatten)]
+        target: OptionalKoma,
+    },
     Devtools,
-    Reload,
+    Reload {
+        #[command(flatten)]
+        target: OptionalKoma,
+        /// Enable KomaAPI for the Web Koma.
+        #[arg(long, conflicts_with = "no_koma_api")]
+        koma_api: bool,
+        /// Disable KomaAPI for the Web Koma.
+        #[arg(long)]
+        no_koma_api: bool,
+    },
     Eval {
+        #[command(flatten)]
+        target: OptionalKoma,
         expr: String,
     },
     /// Run a Node.js module against one Web Koma and print its JSON result.
     Script {
+        #[command(flatten)]
+        target: OptionalKoma,
         /// Module exporting an async function, or "-" to read it from stdin.
         file: PathBuf,
         /// Maximum time for Node.js, including its browser connection.
         #[arg(long, default_value = "30", value_name = "SECONDS")]
         timeout: NonZeroU64,
     },
-    Snapshot,
-    Read,
-    Text,
+    Snapshot {
+        #[command(flatten)]
+        target: OptionalKoma,
+    },
+    Read {
+        #[command(flatten)]
+        target: OptionalKoma,
+        /// Limit output to a selector or element reference.
+        #[arg(long, allow_hyphen_values = true)]
+        within: Option<String>,
+    },
+    Text {
+        #[command(flatten)]
+        target: OptionalKoma,
+    },
     Click {
+        #[command(flatten)]
+        koma: OptionalKoma,
         target: String,
     },
     Fill {
+        #[command(flatten)]
+        koma: OptionalKoma,
         target: String,
         text: String,
     },
     Type {
+        #[command(flatten)]
+        target: OptionalKoma,
         text: String,
     },
 }
@@ -200,21 +255,35 @@ enum Terminal {
         #[arg(long)]
         run: Option<String>,
     },
-    Text,
+    Text {
+        #[command(flatten)]
+        target: OptionalKoma,
+        /// Limit the number of lines returned.
+        #[arg(long)]
+        lines: Option<NonZeroUsize>,
+    },
     /// Send text to a Terminal Koma. Use `--` before text starting with a hyphen.
     Send {
+        #[command(flatten)]
+        target: OptionalKoma,
         text: String,
     },
     /// Send a command followed by Enter.
     Run {
+        #[command(flatten)]
+        target: OptionalKoma,
         command: String,
     },
     /// Send a key chord such as Enter, Shift+Tab, or Ctrl+C.
     Press {
+        #[command(flatten)]
+        target: OptionalKoma,
         key: String,
     },
     /// Signal the foreground process group on macOS and Linux.
     Kill {
+        #[command(flatten)]
+        target: OptionalKoma,
         #[arg(short, long, default_value = "TERM")]
         signal: String,
     },
@@ -223,18 +292,49 @@ enum Terminal {
 #[derive(Debug, Subcommand)]
 enum Drawer {
     List,
-    Keep { input: String },
-    Place { id: Option<String> },
-    Discard { id: Option<String> },
+    Keep {
+        input: String,
+        /// Set the title for the kept Drawer Item.
+        #[arg(long, allow_hyphen_values = true)]
+        title: Option<String>,
+        /// Enable KomaAPI for the Web Koma.
+        #[arg(long)]
+        koma_api: bool,
+    },
+    Place {
+        #[command(flatten)]
+        target: OptionalKoma,
+        id: Option<String>,
+    },
+    Discard {
+        #[command(flatten)]
+        target: OptionalKoma,
+        id: Option<String>,
+    },
     Restore,
 }
 
 #[derive(Debug, Subcommand)]
 enum Notification {
-    Send { body: String },
-    List,
-    Read { id: String },
-    Unread { id: String },
+    Send {
+        #[command(flatten)]
+        target: OptionalKoma,
+        body: String,
+        /// Set the Notification title.
+        #[arg(long, allow_hyphen_values = true)]
+        title: Option<String>,
+    },
+    List {
+        /// List only unread Notifications.
+        #[arg(long)]
+        unread: bool,
+    },
+    Read {
+        id: String,
+    },
+    Unread {
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -244,37 +344,19 @@ enum Bench {
 
 impl Args {
     pub(super) fn validate(self) -> Result<Self, clap::Error> {
-        // clap checks conflicts within a command, not between different levels.
-        if self.koma_api && self.no_koma_api {
-            return Err(Self::command().error(
-                ErrorKind::ArgumentConflict,
-                "--koma-api and --no-koma-api are mutually exclusive",
-            ));
-        }
         match &self.command {
-            Command::Exists
-            | Command::Focus
-            | Command::Move { .. }
-            | Command::Resize { .. }
-            | Command::Close
-                if self.koma.as_deref().is_none_or(|id| id.trim().is_empty()) =>
-            {
-                return Err(Self::command().error(
-                    ErrorKind::MissingRequiredArgument,
-                    "--koma <ID> is required",
-                ));
-            }
             Command::Move {
                 left_of: None,
                 right_of: None,
                 end_of: None,
+                ..
             } => {
                 return Err(Self::command().error(
                     ErrorKind::MissingRequiredArgument,
                     "one of --left-of, --right-of, or --end-of is required",
                 ));
             }
-            Command::Resize { width } if !width.is_finite() || *width <= 0.0 => {
+            Command::Resize { width, .. } if !width.is_finite() || *width <= 0.0 => {
                 return Err(Self::command().error(
                     ErrorKind::ValueValidation,
                     "--width must be finite and positive",
@@ -296,12 +378,6 @@ impl Args {
     }
 
     pub(super) fn into_request(self) -> IpcRequest {
-        let koma_api = match (self.koma_api, self.no_koma_api) {
-            (true, _) => Some(true),
-            (_, true) => Some(false),
-            _ => None,
-        };
-        let koma_id = self.koma;
         let command = match self.command {
             Command::Health => IpcCommand::Health,
             Command::Private => IpcCommand::WorkspacePrivate,
@@ -323,104 +399,145 @@ impl Args {
             Command::Preset(Preset::Apply { name }) => IpcCommand::PresetApply { name },
             Command::List { sheet } => IpcCommand::KomaList(KomaListArgs { sheet_id: sheet }),
             Command::Focused => IpcCommand::KomaFocused,
-            Command::Exists => IpcCommand::KomaExists {
-                koma_id: koma_id.unwrap(),
+            Command::Exists { target } => IpcCommand::KomaExists {
+                koma_id: target.koma,
             },
-            Command::Focus => IpcCommand::KomaFocus {
-                koma_id: koma_id.unwrap(),
+            Command::Focus { target } => IpcCommand::KomaFocus {
+                koma_id: target.koma,
             },
             Command::Move {
+                target,
                 left_of,
                 right_of,
                 end_of,
             } => IpcCommand::KomaMove {
-                koma_id: koma_id.unwrap(),
+                koma_id: target.koma,
                 placement: left_of
                     .map(KomaPlacement::LeftOf)
                     .or_else(|| right_of.map(KomaPlacement::RightOf))
                     .or_else(|| end_of.map(KomaPlacement::EndOf))
                     .unwrap(),
             },
-            Command::Resize { width } => IpcCommand::KomaResize {
-                koma_id: koma_id.unwrap(),
+            Command::Resize { target, width } => IpcCommand::KomaResize {
+                koma_id: target.koma,
                 width,
             },
-            Command::Close => IpcCommand::KomaClose {
-                koma_id: koma_id.unwrap(),
+            Command::Close { target } => IpcCommand::KomaClose {
+                koma_id: target.koma,
             },
-            Command::Web(Web::New { url }) => IpcCommand::WebNew {
-                url,
-                koma_api: koma_api.unwrap_or(false),
-            },
-            Command::Web(Web::Url) => IpcCommand::WebUrl(KomaTarget { koma_id }),
+            Command::Web(Web::New { url, koma_api }) => IpcCommand::WebNew { url, koma_api },
+            Command::Web(Web::Url { target }) => IpcCommand::WebUrl(KomaTarget {
+                koma_id: target.koma,
+            }),
             Command::Web(Web::Devtools) => IpcCommand::WebDevtools,
-            Command::Web(Web::Reload) => IpcCommand::WebReload(WebReloadArgs { koma_id, koma_api }),
-            Command::Web(Web::Eval { expr }) => IpcCommand::WebEval(WebEvalArgs {
-                koma_id,
+            Command::Web(Web::Reload {
+                target,
+                koma_api,
+                no_koma_api,
+            }) => {
+                let koma_api = match (koma_api, no_koma_api) {
+                    (true, _) => Some(true),
+                    (_, true) => Some(false),
+                    _ => None,
+                };
+                IpcCommand::WebReload(WebReloadArgs {
+                    koma_id: target.koma,
+                    koma_api,
+                })
+            }
+            Command::Web(Web::Eval { target, expr }) => IpcCommand::WebEval(WebEvalArgs {
+                koma_id: target.koma,
                 script: expr,
             }),
-            Command::Web(Web::Script { .. }) => IpcCommand::WebScriptTarget(KomaTarget { koma_id }),
-            Command::Web(Web::Snapshot) => IpcCommand::WebSnapshot(KomaTarget { koma_id }),
-            Command::Web(Web::Read) => IpcCommand::WebRead(WebReadArgs {
-                koma_id,
-                within: self.within,
+            Command::Web(Web::Script { target, .. }) => IpcCommand::WebScriptTarget(KomaTarget {
+                koma_id: target.koma,
             }),
-            Command::Web(Web::Text) => IpcCommand::WebText(KomaTarget { koma_id }),
-            Command::Web(Web::Click { target }) => IpcCommand::WebClick(WebClickArgs {
-                koma_id,
+            Command::Web(Web::Snapshot { target }) => IpcCommand::WebSnapshot(KomaTarget {
+                koma_id: target.koma,
+            }),
+            Command::Web(Web::Read { target, within }) => IpcCommand::WebRead(WebReadArgs {
+                koma_id: target.koma,
+                within,
+            }),
+            Command::Web(Web::Text { target }) => IpcCommand::WebText(KomaTarget {
+                koma_id: target.koma,
+            }),
+            Command::Web(Web::Click { koma, target }) => IpcCommand::WebClick(WebClickArgs {
+                koma_id: koma.koma,
                 selector: target,
             }),
-            Command::Web(Web::Fill { target, text }) => IpcCommand::WebFill(WebFillArgs {
-                koma_id,
+            Command::Web(Web::Fill { koma, target, text }) => IpcCommand::WebFill(WebFillArgs {
+                koma_id: koma.koma,
                 selector: target,
                 text,
             }),
-            Command::Web(Web::Type { text }) => IpcCommand::WebType(KomaTextArgs { koma_id, text }),
+            Command::Web(Web::Type { target, text }) => IpcCommand::WebType(KomaTextArgs {
+                koma_id: target.koma,
+                text,
+            }),
             Command::Terminal(Terminal::New { cwd, run }) => {
                 IpcCommand::TerminalNew(TerminalNewArgs { cwd, run })
             }
-            Command::Terminal(Terminal::Text) => IpcCommand::TerminalText(TerminalTextArgs {
-                koma_id,
-                lines: self.lines.map(NonZeroUsize::get),
-            }),
-            Command::Terminal(Terminal::Send { text }) => {
-                IpcCommand::TerminalSend(KomaTextArgs { koma_id, text })
+            Command::Terminal(Terminal::Text { target, lines }) => {
+                IpcCommand::TerminalText(TerminalTextArgs {
+                    koma_id: target.koma,
+                    lines: lines.map(NonZeroUsize::get),
+                })
             }
-            Command::Terminal(Terminal::Run { command }) => IpcCommand::TerminalRun(KomaTextArgs {
-                koma_id,
-                text: command,
-            }),
-            Command::Terminal(Terminal::Press { key }) => {
-                IpcCommand::TerminalPress(KomaTextArgs { koma_id, text: key })
+            Command::Terminal(Terminal::Send { target, text }) => {
+                IpcCommand::TerminalSend(KomaTextArgs {
+                    koma_id: target.koma,
+                    text,
+                })
             }
-            Command::Terminal(Terminal::Kill { signal }) => {
+            Command::Terminal(Terminal::Run { target, command }) => {
+                IpcCommand::TerminalRun(KomaTextArgs {
+                    koma_id: target.koma,
+                    text: command,
+                })
+            }
+            Command::Terminal(Terminal::Press { target, key }) => {
+                IpcCommand::TerminalPress(KomaTextArgs {
+                    koma_id: target.koma,
+                    text: key,
+                })
+            }
+            Command::Terminal(Terminal::Kill { target, signal }) => {
                 IpcCommand::TerminalKill(KomaTextArgs {
-                    koma_id,
+                    koma_id: target.koma,
                     text: signal,
                 })
             }
             Command::Drawer(Drawer::List) => IpcCommand::DrawerList,
-            Command::Drawer(Drawer::Keep { input }) => IpcCommand::DrawerKeep(DrawerKeepArgs {
+            Command::Drawer(Drawer::Keep {
                 input,
-                title: self.title,
-                koma_api: koma_api.unwrap_or(false),
+                title,
+                koma_api,
+            }) => IpcCommand::DrawerKeep(DrawerKeepArgs {
+                input,
+                title,
+                koma_api,
             }),
-            Command::Drawer(Drawer::Place { id }) => IpcCommand::DrawerPlace(KomaTarget {
-                koma_id: koma_id.or(id),
+            Command::Drawer(Drawer::Place { target, id }) => IpcCommand::DrawerPlace(KomaTarget {
+                koma_id: target.koma.or(id),
             }),
-            Command::Drawer(Drawer::Discard { id }) => IpcCommand::DrawerDiscard(KomaTarget {
-                koma_id: koma_id.or(id),
-            }),
-            Command::Drawer(Drawer::Restore) => IpcCommand::DrawerRestore,
-            Command::Notification(Notification::Send { body }) => {
-                IpcCommand::NotificationSend(NotificationSendArgs {
-                    koma_id,
-                    title: self.title,
-                    body,
+            Command::Drawer(Drawer::Discard { target, id }) => {
+                IpcCommand::DrawerDiscard(KomaTarget {
+                    koma_id: target.koma.or(id),
                 })
             }
-            Command::Notification(Notification::List) => IpcCommand::NotificationList {
-                unread_only: self.unread,
+            Command::Drawer(Drawer::Restore) => IpcCommand::DrawerRestore,
+            Command::Notification(Notification::Send {
+                target,
+                body,
+                title,
+            }) => IpcCommand::NotificationSend(NotificationSendArgs {
+                koma_id: target.koma,
+                title,
+                body,
+            }),
+            Command::Notification(Notification::List { unread }) => IpcCommand::NotificationList {
+                unread_only: unread,
             },
             Command::Notification(Notification::Read { id }) => IpcCommand::NotificationRead { id },
             Command::Notification(Notification::Unread { id }) => {
@@ -441,7 +558,7 @@ impl Args {
     }
 
     pub(super) fn web_script(&self) -> Option<(&Path, NonZeroU64)> {
-        let Command::Web(Web::Script { file, timeout }) = &self.command else {
+        let Command::Web(Web::Script { file, timeout, .. }) = &self.command else {
             return None;
         };
         Some((file, *timeout))
@@ -512,10 +629,11 @@ mod tests {
     #[test]
     fn validates_koma_targets_and_move_placement() {
         assert!(parse(&["close"]).is_err());
+        assert!(parse(&["close", "--koma", "  "]).is_err());
         assert!(parse(&["move", "--koma", "b1"]).is_err());
-        assert!(parse(&["move", "--koma", "b1", "--left-of", "b2", "--end-of", "d1",]).is_err());
+        assert!(parse(&["move", "--koma", "b1", "--left-of", "b2", "--end-of", "d1"]).is_err());
         assert!(parse(&["resize", "--koma", "b1", "--width", "NaN"]).is_err());
-        let request = parse(&["--koma", "b1", "move", "--end-of", "d1"])
+        let request = parse(&["move", "--koma", "b1", "--end-of", "d1"])
             .unwrap()
             .into_request();
         assert_eq!(
@@ -528,9 +646,9 @@ mod tests {
     }
 
     #[test]
-    fn keeps_flags_available_around_subcommands() {
+    fn keeps_global_flags_available_around_subcommands() {
         let args = parse(&[
-            "--socket", "one", "--koma", "b1", "web", "read", "--socket", "two", "--within", "@e1",
+            "--socket", "one", "web", "read", "--koma", "b1", "--socket", "two", "--within", "@e1",
             "--json",
         ])
         .unwrap();
@@ -551,7 +669,7 @@ mod tests {
             "example.com",
             "--title",
             "Ex",
-            "--no-koma-api",
+            "--koma-api",
         ])
         .unwrap()
         .into_request();
@@ -560,7 +678,7 @@ mod tests {
             IpcCommand::DrawerKeep(DrawerKeepArgs {
                 input: "example.com".into(),
                 title: Some("Ex".into()),
-                koma_api: false,
+                koma_api: true,
             })
         );
 
@@ -604,7 +722,23 @@ mod tests {
             })
         );
         assert!(parse(&["terminal", "text", "--lines", "0"]).is_err());
-        let err = parse(&["--koma-api", "web", "reload", "--no-koma-api"]).unwrap_err();
+        let err = parse(&["web", "reload", "--koma-api", "--no-koma-api"]).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn rejects_subcommand_options_on_unrelated_commands() {
+        for argv in [
+            &["terminal", "text", "--within", "@e1"][..],
+            &["web", "read", "--lines", "10"],
+            &["sheet", "list", "--unread"],
+            &["drawer", "keep", "example.com", "--no-koma-api"],
+            &["health", "--koma", "b1"],
+            &["sheet", "list", "--koma", "b1"],
+            &["web", "new", "https://example.com", "--koma", "b1"],
+        ] {
+            let err = parse(argv).unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::UnknownArgument, "{argv:?}");
+        }
     }
 }
