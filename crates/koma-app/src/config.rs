@@ -97,6 +97,29 @@ pub struct TerminalConfig {
     pub session_list_command: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScaleConfig {
+    pub web: f64,
+    pub terminal: f64,
+}
+
+impl Default for ScaleConfig {
+    fn default() -> Self {
+        Self {
+            web: 1.0,
+            terminal: 1.0,
+        }
+    }
+}
+
+fn parse_scale(value: &toml::Value, key: &str) -> Result<f64, String> {
+    value
+        .as_float()
+        .or_else(|| value.as_integer().map(|i| i as f64))
+        .filter(|s| s.is_finite() && (0.5..=2.0).contains(s))
+        .ok_or_else(|| format!("scale.{key} must be a number in [0.5, 2.0]"))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SheetPresetConfig {
     pub name: String,
@@ -116,6 +139,7 @@ pub struct Config {
     pub sheet_presets: Vec<SheetPresetConfig>,
     pub search_engine: SearchEngine,
     pub terminal: TerminalConfig,
+    pub scale: ScaleConfig,
     pub theme: ThemeConfig,
     pub keybindings: Keybindings,
 }
@@ -131,6 +155,7 @@ impl Default for Config {
             sheet_presets: Vec::new(),
             search_engine: SearchEngine::default(),
             terminal: TerminalConfig::default(),
+            scale: ScaleConfig::default(),
             theme: ThemeConfig::default(),
             keybindings: Keybindings::default(),
         }
@@ -280,6 +305,16 @@ impl Config {
                     .filter(|s| !s.is_empty())
                     .ok_or("terminal.session_list_command must be a non-empty string")?;
                 config.terminal.session_list_command = Some(cmd.to_string());
+            }
+        }
+        if let Some(scale) = table.get("scale") {
+            let tbl = scale.as_table().ok_or("[scale] must be a table")?;
+            for (key, value) in tbl {
+                match key.as_str() {
+                    "web" => config.scale.web = parse_scale(value, key)?,
+                    "terminal" => config.scale.terminal = parse_scale(value, key)?,
+                    other => return Err(format!("Unknown scale.{other} key")),
+                }
             }
         }
         if let Some(theme) = table.get("theme") {
@@ -535,5 +570,40 @@ accent = "#112233cc"
         assert!(Config::parse("[theme]\nappearance = \"sepia\"").is_err());
         assert!(Config::parse("[theme]\naccent = \"red\"").is_err());
         assert!(Config::parse("[theme]\nunknown_key = \"#ffffff\"").is_err());
+    }
+
+    #[test]
+    fn parses_scale_and_rejects_invalid_values() {
+        assert_eq!(
+            Config::default().scale,
+            ScaleConfig {
+                web: 1.0,
+                terminal: 1.0
+            }
+        );
+
+        let cfg = Config::parse("[scale]\nweb = 0.9\nterminal = 2").unwrap();
+        assert_eq!(
+            cfg.scale,
+            ScaleConfig {
+                web: 0.9,
+                terminal: 2.0
+            }
+        );
+
+        let min_cfg = Config::parse("[scale]\nweb = 0.5\nterminal = 0.5").unwrap();
+        assert_eq!(
+            min_cfg.scale,
+            ScaleConfig {
+                web: 0.5,
+                terminal: 0.5
+            }
+        );
+
+        assert!(Config::parse("[scale]\nweb = 0.49").is_err());
+        assert!(Config::parse("[scale]\nterminal = 2.01").is_err());
+        assert!(Config::parse("[scale]\nweb = \"0.9\"").is_err());
+        assert!(Config::parse("[scale]\nunknown = 1.0").is_err());
+        assert!(Config::parse("scale = 1.0").is_err());
     }
 }

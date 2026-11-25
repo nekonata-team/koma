@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use koma_app::config::CenterFocused;
+use koma_app::config::{CenterFocused, ScaleConfig};
 use koma_app::ghostty_config::{CellHeight, TerminalSettings};
 use koma_core::model::{InputMode, KomaId, KomaKind, KomaMeta, SheetId, WorkspaceState};
 use makepad_app_terminal::term::color::Rgb;
@@ -32,6 +32,10 @@ impl SheetStrip {
 
     pub fn set_center_focused(&mut self, mode: CenterFocused) {
         self.center_focused = mode;
+    }
+
+    pub fn set_scale(&mut self, scale: ScaleConfig) {
+        self.scale = scale;
     }
 
     pub fn set_koma_gap(&mut self, gap: f64) {
@@ -341,6 +345,7 @@ impl SheetStrip {
                         ("KOMA_SOCKET".into(), sock_path.to_string()),
                         ("PATH".into(), path_env.to_string()),
                     ];
+                    term.set_presentation_font_scale(cx, self.scale.terminal);
                     term.ensure_started(cx);
                 }
                 self.koma_widgets.insert(koma.id.clone(), widget);
@@ -355,7 +360,12 @@ impl SheetStrip {
                     .to_string();
                 if let Some(rt) = &self.shared_web_runtime {
                     if let Some(mut web) = widget.borrow_mut::<WebKoma>() {
-                        web.bind_shared(Rc::clone(rt), koma.id.clone(), url.clone());
+                        web.bind_shared(
+                            Rc::clone(rt),
+                            koma.id.clone(),
+                            url.clone(),
+                            self.scale.web,
+                        );
                     }
                     if !should_paint_now {
                         rt.borrow_mut().ensure_koma(

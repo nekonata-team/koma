@@ -100,6 +100,7 @@ pub struct WebViewRuntime {
     pending_script_targets: Vec<PendingScriptTarget>,
     pending: PendingEvents,
     notification_bridges: HashMap<ViewId, NotificationBridge>,
+    default_page_zoom: f64,
     last_size: Option<(Vec2d, f64)>,
     last_event: Option<(u64, bool)>,
 }
@@ -116,9 +117,14 @@ impl WebViewRuntime {
             pending_script_targets: Vec::new(),
             pending: PendingEvents::default(),
             notification_bridges: HashMap::new(),
+            default_page_zoom: 1.0,
             last_size: None,
             last_event: None,
         }
+    }
+
+    pub fn set_default_page_zoom(&mut self, factor: f64) {
+        self.default_page_zoom = factor;
     }
 
     pub fn view_count(&self) -> usize {
@@ -201,6 +207,14 @@ impl WebViewRuntime {
         self.last_size = Some((size, dpi));
         self.views.set_size(id, size, dpi);
         self.views.send(id, ViewOp::Hidden { on: !visible });
+        if self.default_page_zoom != 1.0 {
+            self.views.send(
+                id,
+                ViewOp::PageZoom {
+                    factor: self.default_page_zoom,
+                },
+            );
+        }
         self.views.service(cx);
         Some(id)
     }
@@ -501,6 +515,14 @@ impl WebViewRuntime {
         state.last_observed_url = Some(url.to_string());
         self.views.set_size(view_id, size, dpi);
         self.views.send(view_id, ViewOp::Hidden { on: false });
+        if self.default_page_zoom != 1.0 {
+            self.views.send(
+                view_id,
+                ViewOp::PageZoom {
+                    factor: self.default_page_zoom,
+                },
+            );
+        }
         self.views.service(cx);
     }
 

@@ -74,18 +74,18 @@ impl SheetStrip {
         let Some(widget) = self.koma_widgets.get(koma_id) else {
             return;
         };
-        let next = |factor: f64| {
+        let next = |factor: f64, default: f64| {
             if step == 0 {
-                1.0
+                default
             } else {
                 ((factor * 10.0).round() + f64::from(step)).clamp(5.0, 20.0) / 10.0
             }
         };
         if let Some(mut term) = widget.borrow_mut::<MpTerm>() {
-            let factor = next(term.cell_size().1);
+            let factor = next(term.cell_size().1, self.scale.terminal);
             term.set_presentation_font_scale(cx, factor);
         } else if let Some(mut web) = widget.borrow_mut::<WebKoma>() {
-            let factor = next(web.page_zoom());
+            let factor = next(web.page_zoom(), self.scale.web);
             web.set_page_zoom(cx, factor, step == 0);
         }
     }

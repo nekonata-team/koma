@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use koma_app::config::CenterFocused;
+use koma_app::config::{CenterFocused, ScaleConfig};
 use koma_app::ghostty_config::TerminalSettings;
 use koma_core::model::{InputMode, KomaId, KomaKind, SheetId, MIN_PROPORTIONAL_WIDTH};
 use makepad_widgets::event::ScrollPhase;
@@ -223,6 +223,8 @@ pub struct SheetStrip {
     discard_scroll_continuation: bool,
     #[rust]
     center_focused: CenterFocused,
+    #[rust]
+    scale: ScaleConfig,
     #[rust]
     theme_colors: StripThemeColors,
     #[rust(STRIP_SPACING)]

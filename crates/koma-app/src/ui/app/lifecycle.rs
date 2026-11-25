@@ -183,6 +183,9 @@ impl App {
             cef_dir
         };
         let web_runtime = Rc::new(RefCell::new(WebViewRuntime::new(browser_dir)));
+        web_runtime
+            .borrow_mut()
+            .set_default_page_zoom(self.config.scale.web);
         self.web_runtime = Some(Rc::clone(&web_runtime));
 
         let mut path_env = std::env::var("PATH").unwrap_or_default();
@@ -213,6 +216,7 @@ impl App {
             strip.set_terminal_settings(terminal_settings);
             strip.set_terminal_shell(self.config.terminal.shell.clone());
             strip.set_center_focused(self.config.center_focused);
+            strip.set_scale(self.config.scale);
             strip.set_koma_gap(self.config.koma_gap);
         });
         {
@@ -274,10 +278,14 @@ impl App {
         for diagnostic in &diagnostics {
             eprintln!("[koma:ghostty] {diagnostic}");
         }
+        if let Some(rt) = &self.web_runtime {
+            rt.borrow_mut().set_default_page_zoom(self.config.scale.web);
+        }
         self.with_strip_mut(cx, |strip, _| {
             strip.set_terminal_settings(terminal_settings);
             strip.set_terminal_shell(self.config.terminal.shell.clone());
             strip.set_center_focused(self.config.center_focused);
+            strip.set_scale(self.config.scale);
             strip.set_koma_gap(self.config.koma_gap);
         });
         self.apply_theme(cx);

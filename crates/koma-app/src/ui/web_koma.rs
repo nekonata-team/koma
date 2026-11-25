@@ -68,10 +68,12 @@ impl WebKoma {
         runtime: Rc<RefCell<WebViewRuntime>>,
         koma_id: KomaId,
         initial_url: String,
+        initial_zoom: f64,
     ) {
         self.shared_runtime = Some(runtime);
         self.koma_id = Some(koma_id);
         self.initial_url = initial_url;
+        self.page_zoom = initial_zoom;
     }
 
     fn with_runtime<R>(&self, f: impl FnOnce(&mut WebViewRuntime) -> R) -> Option<R> {
@@ -96,14 +98,16 @@ impl WebKoma {
     }
 
     pub fn set_page_zoom(&mut self, cx: &mut Cx, factor: f64, reset: bool) {
-        let op = if reset {
-            ViewOp::ResetZoom
-        } else if self.page_zoom != factor {
-            ViewOp::PageZoom { factor }
-        } else {
-            return;
-        };
-        if self.send_view_op(cx, op) {
+        if reset {
+            if !self.send_view_op(cx, ViewOp::ResetZoom) {
+                return;
+            }
+            if factor != 1.0 && !self.send_view_op(cx, ViewOp::PageZoom { factor }) {
+                self.page_zoom = 1.0;
+                return;
+            }
+            self.page_zoom = factor;
+        } else if self.page_zoom != factor && self.send_view_op(cx, ViewOp::PageZoom { factor }) {
             self.page_zoom = factor;
         }
     }
