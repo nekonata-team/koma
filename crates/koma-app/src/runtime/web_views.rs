@@ -10,11 +10,11 @@ use makepad_browser_view::{
     AuthRequestEvent, BrowserViews, DownloadRequestEvent, DownloadUpdateEvent, FileDialogEvent,
     JsDialogEvent, RingShown, SitePermissionEvent, ViewId, ViewOp,
 };
-use makepad_micro_serde::*;
 use makepad_widgets::*;
 
 use super::web_notifications::{NotificationBridge, WebNotification};
 
+mod devtools;
 mod js_bridge;
 
 pub use js_bridge::{
@@ -62,34 +62,44 @@ struct PendingScriptTarget {
     reply: mpsc::SyncSender<IpcResponse>,
 }
 
+#[derive(Default)]
+struct KomaViewState {
+    size: Option<(Vec2d, f64)>,
+    hidden: Option<bool>,
+    koma_api_enabled: bool,
+    koma_api_injected_url: Option<String>,
+    web_nav_injected_url: Option<String>,
+    last_observed_url: Option<String>,
+}
+
+#[derive(Default)]
+struct PendingEvents {
+    popups: Vec<String>,
+    popup_views: Vec<(ViewId, String)>,
+    external_urls: Vec<String>,
+    file_dialogs: Vec<(ViewId, FileDialogEvent)>,
+    download_requests: Vec<(ViewId, DownloadRequestEvent)>,
+    download_updates: Vec<DownloadUpdateEvent>,
+    js_dialogs: Vec<(ViewId, JsDialogEvent)>,
+    auth_requests: Vec<(ViewId, AuthRequestEvent)>,
+    permission_requests: Vec<(ViewId, SitePermissionEvent)>,
+    closed_komas: Vec<KomaId>,
+    koma_api: Vec<KomaApiEvent>,
+    web_nav: Vec<WebNavEvent>,
+    web_notifications: Vec<WebNotification>,
+    url_changes: Vec<(KomaId, String)>,
+}
+
 pub struct WebViewRuntime {
     views: BrowserViews,
     koma_to_view: HashMap<KomaId, ViewId>,
     view_to_koma: HashMap<ViewId, KomaId>,
-    koma_sizes: HashMap<KomaId, (Vec2d, f64)>,
-    koma_hidden: HashMap<KomaId, bool>,
+    koma_states: HashMap<KomaId, KomaViewState>,
     focused_koma: Option<KomaId>,
     pending_evals: HashMap<u64, PendingEval>,
     pending_script_targets: Vec<PendingScriptTarget>,
-    pending_popups: Vec<String>,
-    pending_popup_views: Vec<(ViewId, String)>,
-    pending_external_urls: Vec<String>,
-    pending_file_dialogs: Vec<(ViewId, FileDialogEvent)>,
-    pending_download_requests: Vec<(ViewId, DownloadRequestEvent)>,
-    pending_download_updates: Vec<DownloadUpdateEvent>,
-    pending_js_dialogs: Vec<(ViewId, JsDialogEvent)>,
-    pending_auth_requests: Vec<(ViewId, AuthRequestEvent)>,
-    pending_permission_requests: Vec<(ViewId, SitePermissionEvent)>,
-    pending_closed_komas: Vec<KomaId>,
-    koma_api_enabled: HashMap<KomaId, bool>,
-    koma_api_injected_url: HashMap<KomaId, String>,
-    pending_koma_api: Vec<KomaApiEvent>,
-    web_nav_injected_url: HashMap<KomaId, String>,
-    pending_web_nav: Vec<WebNavEvent>,
+    pending: PendingEvents,
     notification_bridges: HashMap<ViewId, NotificationBridge>,
-    pending_web_notifications: Vec<WebNotification>,
-    last_observed_url: HashMap<KomaId, String>,
-    pending_url_changes: Vec<(KomaId, String)>,
     last_size: Option<(Vec2d, f64)>,
     last_event: Option<(u64, bool)>,
 }
@@ -100,30 +110,12 @@ impl WebViewRuntime {
             views: BrowserViews::new_with_profile_dir(profile_dir),
             koma_to_view: HashMap::new(),
             view_to_koma: HashMap::new(),
-            koma_sizes: HashMap::new(),
-            koma_hidden: HashMap::new(),
+            koma_states: HashMap::new(),
             focused_koma: None,
             pending_evals: HashMap::new(),
             pending_script_targets: Vec::new(),
-            pending_popups: Vec::new(),
-            pending_popup_views: Vec::new(),
-            pending_external_urls: Vec::new(),
-            pending_file_dialogs: Vec::new(),
-            pending_download_requests: Vec::new(),
-            pending_download_updates: Vec::new(),
-            pending_js_dialogs: Vec::new(),
-            pending_auth_requests: Vec::new(),
-            pending_permission_requests: Vec::new(),
-            pending_closed_komas: Vec::new(),
-            koma_api_enabled: HashMap::new(),
-            koma_api_injected_url: HashMap::new(),
-            pending_koma_api: Vec::new(),
-            web_nav_injected_url: HashMap::new(),
-            pending_web_nav: Vec::new(),
+            pending: PendingEvents::default(),
             notification_bridges: HashMap::new(),
-            pending_web_notifications: Vec::new(),
-            last_observed_url: HashMap::new(),
-            pending_url_changes: Vec::new(),
             last_size: None,
             last_event: None,
         }
@@ -202,10 +194,10 @@ impl WebViewRuntime {
         }
         self.koma_to_view.insert(koma_id.clone(), id);
         self.view_to_koma.insert(id, koma_id.clone());
-        self.koma_sizes.insert(koma_id.clone(), (size, dpi));
-        self.koma_hidden.insert(koma_id.clone(), !visible);
-        self.last_observed_url
-            .insert(koma_id.clone(), url.to_string());
+        let state = self.koma_states.entry(koma_id.clone()).or_default();
+        state.size = Some((size, dpi));
+        state.hidden = Some(!visible);
+        state.last_observed_url = Some(url.to_string());
         self.last_size = Some((size, dpi));
         self.views.set_size(id, size, dpi);
         self.views.send(id, ViewOp::Hidden { on: !visible });
@@ -228,12 +220,7 @@ impl WebViewRuntime {
         };
         self.view_to_koma.remove(&id);
         self.notification_bridges.remove(&id);
-        self.koma_sizes.remove(koma_id);
-        self.koma_hidden.remove(koma_id);
-        self.koma_api_enabled.remove(koma_id);
-        self.koma_api_injected_url.remove(koma_id);
-        self.web_nav_injected_url.remove(koma_id);
-        self.last_observed_url.remove(koma_id);
+        self.koma_states.remove(koma_id);
         if self.focused_koma.as_ref() == Some(koma_id) {
             self.focused_koma = None;
         }
@@ -277,10 +264,11 @@ impl WebViewRuntime {
         let Some(id) = self.koma_to_view.get(koma_id).copied() else {
             return;
         };
-        if self.koma_hidden.get(koma_id).copied() == Some(hidden) {
+        let state = self.koma_states.entry(koma_id.clone()).or_default();
+        if state.hidden == Some(hidden) {
             return;
         }
-        self.koma_hidden.insert(koma_id.clone(), hidden);
+        state.hidden = Some(hidden);
         if hidden {
             self.views.send(id, ViewOp::Focus { on: false });
         }
@@ -293,7 +281,8 @@ impl WebViewRuntime {
         let Some(id) = self.koma_to_view.get(koma_id).copied() else {
             return;
         };
-        if let Some((prev_size, prev_dpi)) = self.koma_sizes.get(koma_id).copied() {
+        let state = self.koma_states.entry(koma_id.clone()).or_default();
+        if let Some((prev_size, prev_dpi)) = state.size {
             if (prev_size.x - size.x).abs() < 0.5
                 && (prev_size.y - size.y).abs() < 0.5
                 && (prev_dpi - dpi).abs() < 0.001
@@ -301,7 +290,7 @@ impl WebViewRuntime {
                 return;
             }
         }
-        self.koma_sizes.insert(koma_id.clone(), (size, dpi));
+        state.size = Some((size, dpi));
         self.views.set_size(id, size, dpi);
         self.views.service(cx);
     }
@@ -379,23 +368,23 @@ impl WebViewRuntime {
     }
 
     pub fn take_popup_urls(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.pending_popups)
+        std::mem::take(&mut self.pending.popups)
     }
 
     pub fn take_popup_views(&mut self) -> Vec<(ViewId, String)> {
-        std::mem::take(&mut self.pending_popup_views)
+        std::mem::take(&mut self.pending.popup_views)
     }
 
     pub fn take_external_urls(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.pending_external_urls)
+        std::mem::take(&mut self.pending.external_urls)
     }
 
     pub fn take_closed_komas(&mut self) -> Vec<KomaId> {
-        std::mem::take(&mut self.pending_closed_komas)
+        std::mem::take(&mut self.pending.closed_komas)
     }
 
     pub fn take_file_dialogs(&mut self) -> Vec<(ViewId, FileDialogEvent)> {
-        std::mem::take(&mut self.pending_file_dialogs)
+        std::mem::take(&mut self.pending.file_dialogs)
     }
 
     pub fn resolve_file_dialog(
@@ -411,11 +400,11 @@ impl WebViewRuntime {
     }
 
     pub fn take_download_requests(&mut self) -> Vec<(ViewId, DownloadRequestEvent)> {
-        std::mem::take(&mut self.pending_download_requests)
+        std::mem::take(&mut self.pending.download_requests)
     }
 
     pub fn take_download_updates(&mut self) -> Vec<DownloadUpdateEvent> {
-        std::mem::take(&mut self.pending_download_updates)
+        std::mem::take(&mut self.pending.download_updates)
     }
 
     pub fn resolve_download(
@@ -436,7 +425,7 @@ impl WebViewRuntime {
     }
 
     pub fn take_js_dialogs(&mut self) -> Vec<(ViewId, JsDialogEvent)> {
-        std::mem::take(&mut self.pending_js_dialogs)
+        std::mem::take(&mut self.pending.js_dialogs)
     }
 
     pub fn resolve_js_dialog(
@@ -459,7 +448,7 @@ impl WebViewRuntime {
     }
 
     pub fn take_auth_requests(&mut self) -> Vec<(ViewId, AuthRequestEvent)> {
-        std::mem::take(&mut self.pending_auth_requests)
+        std::mem::take(&mut self.pending.auth_requests)
     }
 
     pub fn resolve_auth_request(
@@ -482,7 +471,7 @@ impl WebViewRuntime {
     }
 
     pub fn take_permission_requests(&mut self) -> Vec<(ViewId, SitePermissionEvent)> {
-        std::mem::take(&mut self.pending_permission_requests)
+        std::mem::take(&mut self.pending.permission_requests)
     }
 
     pub fn resolve_permission_request(
@@ -506,35 +495,36 @@ impl WebViewRuntime {
         self.koma_to_view.insert(koma_id.clone(), view_id);
         self.view_to_koma.insert(view_id, koma_id.clone());
         let (size, dpi) = self.last_size.unwrap_or((dvec2(640.0, 680.0), 2.0));
-        self.koma_sizes.insert(koma_id.clone(), (size, dpi));
-        self.koma_hidden.insert(koma_id.clone(), false);
-        self.last_observed_url
-            .insert(koma_id.clone(), url.to_string());
+        let state = self.koma_states.entry(koma_id.clone()).or_default();
+        state.size = Some((size, dpi));
+        state.hidden = Some(false);
+        state.last_observed_url = Some(url.to_string());
         self.views.set_size(view_id, size, dpi);
         self.views.send(view_id, ViewOp::Hidden { on: false });
         self.views.service(cx);
     }
 
     pub fn take_koma_api_events(&mut self) -> Vec<KomaApiEvent> {
-        std::mem::take(&mut self.pending_koma_api)
+        std::mem::take(&mut self.pending.koma_api)
     }
 
     pub fn take_web_nav_events(&mut self) -> Vec<WebNavEvent> {
-        std::mem::take(&mut self.pending_web_nav)
+        std::mem::take(&mut self.pending.web_nav)
     }
 
     pub fn take_web_notifications(&mut self) -> Vec<WebNotification> {
-        std::mem::take(&mut self.pending_web_notifications)
+        std::mem::take(&mut self.pending.web_notifications)
     }
 
     pub fn take_url_changes(&mut self) -> Vec<(KomaId, String)> {
-        std::mem::take(&mut self.pending_url_changes)
+        std::mem::take(&mut self.pending.url_changes)
     }
 
     pub fn set_koma_api_enabled(&mut self, cx: &mut Cx, koma_id: &KomaId, enabled: bool) {
-        self.koma_api_enabled.insert(koma_id.clone(), enabled);
+        let state = self.koma_states.entry(koma_id.clone()).or_default();
+        state.koma_api_enabled = enabled;
         if !enabled {
-            self.koma_api_injected_url.remove(koma_id);
+            state.koma_api_injected_url = None;
             if let Some(id) = self.koma_to_view.get(koma_id).copied() {
                 self.views.send(id, ViewOp::Reload);
                 self.views.service(cx);
@@ -698,33 +688,28 @@ impl WebViewRuntime {
                     self.views.state(id).map(|s| (s.loading, s.url.clone()))
                 {
                     if !loading && !url.is_empty() {
-                        if should_record_url_change(
-                            self.last_observed_url.get(koma_id).map(String::as_str),
-                            &url,
-                        ) {
-                            self.last_observed_url.insert(koma_id.clone(), url.clone());
-                            self.pending_url_changes
+                        let state = self.koma_states.entry(koma_id.clone()).or_default();
+                        if should_record_url_change(state.last_observed_url.as_deref(), &url) {
+                            state.last_observed_url = Some(url.clone());
+                            self.pending
+                                .url_changes
                                 .push((koma_id.clone(), url.clone()));
                             changed = true;
                         }
-                        let nav_already = self.web_nav_injected_url.get(koma_id) == Some(&url);
-                        if !nav_already {
-                            self.web_nav_injected_url
-                                .insert(koma_id.clone(), url.clone());
+                        if state.web_nav_injected_url.as_deref() != Some(url.as_str()) {
+                            state.web_nav_injected_url = Some(url.clone());
                             let expr = build_web_navigation_inject_expr();
                             self.views.evaluate(id, &expr);
                             self.views.service(cx);
                         }
-                        if self.koma_api_enabled.get(koma_id).copied().unwrap_or(false)
+                        if state.koma_api_enabled
                             && is_local_html_url(&url)
+                            && state.koma_api_injected_url.as_deref() != Some(url.as_str())
                         {
-                            let already = self.koma_api_injected_url.get(koma_id) == Some(&url);
-                            if !already {
-                                self.koma_api_injected_url.insert(koma_id.clone(), url);
-                                let expr = build_koma_api_inject_expr();
-                                self.views.evaluate(id, &expr);
-                                self.views.service(cx);
-                            }
+                            state.koma_api_injected_url = Some(url);
+                            let expr = build_koma_api_inject_expr();
+                            self.views.evaluate(id, &expr);
+                            self.views.service(cx);
                         }
                     }
                 }
@@ -741,7 +726,7 @@ impl WebViewRuntime {
                         bridge.receive(koma, &state.url, &line.message)
                     })
                 {
-                    self.pending_web_notifications.push(notification);
+                    self.pending.web_notifications.push(notification);
                     continue;
                 }
                 if let Some(payload) = line.message.strip_prefix("__KOMA_WEB_NAV__:") {
@@ -749,21 +734,24 @@ impl WebViewRuntime {
                         .as_ref()
                         .and_then(|koma_id| parse_web_nav_event(koma_id, payload))
                     {
-                        self.pending_web_nav.push(ev);
+                        self.pending.web_nav.push(ev);
                         changed = true;
                     }
                     continue;
                 }
                 if let Some(payload) = line.message.strip_prefix("__KOMA_API__:") {
                     if let Some(koma_id) = &koma_id_opt {
-                        let allowed = self.koma_api_enabled.get(koma_id).copied().unwrap_or(false)
+                        let allowed = self
+                            .koma_states
+                            .get(koma_id)
+                            .is_some_and(|s| s.koma_api_enabled)
                             && self
                                 .views
                                 .state(id)
                                 .is_some_and(|s| is_local_html_url(&s.url));
                         if allowed {
                             if let Some(ev) = parse_koma_api_event(koma_id, payload) {
-                                self.pending_koma_api.push(ev);
+                                self.pending.koma_api.push(ev);
                                 changed = true;
                             }
                         }
@@ -811,57 +799,62 @@ impl WebViewRuntime {
             }
             let popups = self.views.take_popups(id);
             if !popups.is_empty() {
-                self.pending_popups.extend(popups);
+                self.pending.popups.extend(popups);
                 changed = true;
             }
             let popup_views = self.views.take_popup_views(id);
             if !popup_views.is_empty() {
-                self.pending_popup_views.extend(popup_views);
+                self.pending.popup_views.extend(popup_views);
                 changed = true;
             }
             let external_urls = self.views.take_external_urls(id);
             if !external_urls.is_empty() {
-                self.pending_external_urls.extend(external_urls);
+                self.pending.external_urls.extend(external_urls);
                 changed = true;
             }
             let file_dialogs = self.views.take_file_dialogs(id);
             if !file_dialogs.is_empty() {
-                self.pending_file_dialogs
+                self.pending
+                    .file_dialogs
                     .extend(file_dialogs.into_iter().map(|req| (id, req)));
                 changed = true;
             }
             let download_requests = self.views.take_download_requests(id);
             if !download_requests.is_empty() {
-                self.pending_download_requests
+                self.pending
+                    .download_requests
                     .extend(download_requests.into_iter().map(|req| (id, req)));
                 changed = true;
             }
             let download_updates = self.views.take_download_updates(id);
             if !download_updates.is_empty() {
-                self.pending_download_updates.extend(download_updates);
+                self.pending.download_updates.extend(download_updates);
                 changed = true;
             }
             let js_dialogs = self.views.take_js_dialogs(id);
             if !js_dialogs.is_empty() {
-                self.pending_js_dialogs
+                self.pending
+                    .js_dialogs
                     .extend(js_dialogs.into_iter().map(|req| (id, req)));
                 changed = true;
             }
             let auth_requests = self.views.take_auth_requests(id);
             if !auth_requests.is_empty() {
-                self.pending_auth_requests
+                self.pending
+                    .auth_requests
                     .extend(auth_requests.into_iter().map(|req| (id, req)));
                 changed = true;
             }
             let permission_requests = self.views.take_permission_requests(id);
             if !permission_requests.is_empty() {
-                self.pending_permission_requests
+                self.pending
+                    .permission_requests
                     .extend(permission_requests.into_iter().map(|req| (id, req)));
                 changed = true;
             }
             if self.views.take_closed(id) {
                 if let Some(koma_id) = self.view_to_koma.get(&id).cloned() {
-                    self.pending_closed_komas.push(koma_id);
+                    self.pending.closed_komas.push(koma_id);
                     changed = true;
                 }
             }
@@ -891,165 +884,20 @@ impl WebViewRuntime {
         self.views.shutdown(cx);
         self.koma_to_view.clear();
         self.view_to_koma.clear();
-        self.koma_sizes.clear();
-        self.koma_hidden.clear();
+        self.koma_states.clear();
         self.pending_evals.clear();
         for pending in self.pending_script_targets.drain(..) {
             let _ = pending
                 .reply
                 .send(IpcResponse::err("Browser host is shutting down"));
         }
-        self.pending_popups.clear();
-        self.pending_popup_views.clear();
-        self.pending_external_urls.clear();
-        self.pending_file_dialogs.clear();
-        self.pending_download_requests.clear();
-        self.pending_download_updates.clear();
-        self.pending_js_dialogs.clear();
-        self.pending_auth_requests.clear();
-        self.pending_permission_requests.clear();
-        self.pending_closed_komas.clear();
-        self.koma_api_enabled.clear();
-        self.koma_api_injected_url.clear();
-        self.pending_koma_api.clear();
-        self.web_nav_injected_url.clear();
-        self.pending_web_nav.clear();
+        self.pending = PendingEvents::default();
     }
 
     pub fn koma_ime_caret(&self, koma_id: &KomaId) -> Option<(i32, i32, i32, i32)> {
         let id = self.koma_to_view.get(koma_id).copied()?;
         self.views.state(id)?.ime_caret
     }
-
-    pub fn resolve_devtools_url(&self, koma_id: &KomaId) -> Result<String, String> {
-        let port = self
-            .views
-            .devtools_port()
-            .ok_or_else(|| "DevTools unavailable: browser host not ready".to_string())?;
-        let target_url = self.koma_url_title(koma_id).map(|(u, _)| u);
-        if let Some(json) = fetch_devtools_json(port) {
-            if let Some(url) = parse_devtools_frontend_url(&json, target_url.as_deref(), port) {
-                return Ok(url);
-            }
-        }
-        Ok(format!("http://127.0.0.1:{port}/"))
-    }
-}
-
-fn fetch_devtools_json(port: u16) -> Option<String> {
-    use std::io::{Read, Write};
-    use std::net::{SocketAddr, TcpStream};
-    use std::time::Duration;
-
-    let addr: SocketAddr = ([127, 0, 0, 1], port).into();
-    let mut stream = None;
-    for attempt in 0..10 {
-        match TcpStream::connect_timeout(&addr, Duration::from_millis(200)) {
-            Ok(s) => {
-                stream = Some(s);
-                break;
-            }
-            Err(_) if attempt + 1 < 10 => {
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => return None,
-        }
-    }
-    let mut stream = stream?;
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
-    let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
-    let req =
-        format!("GET /json/list HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-    stream.write_all(req.as_bytes()).ok()?;
-
-    let mut raw = Vec::new();
-    let mut buf = [0u8; 4096];
-    let mut header_end = None;
-    let mut content_length = None;
-    loop {
-        match stream.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                raw.extend_from_slice(&buf[..n]);
-                if header_end.is_none() {
-                    if let Some(pos) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
-                        let end = pos + 4;
-                        header_end = Some(end);
-                        let headers = String::from_utf8_lossy(&raw[..pos]);
-                        content_length = headers.lines().find_map(|line| {
-                            let (k, v) = line.split_once(':')?;
-                            k.trim()
-                                .eq_ignore_ascii_case("content-length")
-                                .then(|| v.trim().parse::<usize>().ok())?
-                        });
-                    }
-                }
-                if let (Some(end), Some(len)) = (header_end, content_length) {
-                    if raw.len() >= end + len {
-                        break;
-                    }
-                }
-            }
-            Err(_) => break,
-        }
-    }
-    let end = header_end?;
-    let body = match content_length {
-        Some(len) => raw.get(end..end + len)?,
-        None => &raw[end..],
-    };
-    Some(String::from_utf8_lossy(body).trim().to_string())
-}
-
-pub fn parse_devtools_frontend_url(
-    json: &str,
-    target_url: Option<&str>,
-    port: u16,
-) -> Option<String> {
-    let val = JsonValue::deserialize_json(json).ok()?;
-    let JsonValue::Array(items) = val else {
-        return None;
-    };
-    let normalize = |raw: &str| -> String {
-        if raw.starts_with('/') {
-            format!("http://127.0.0.1:{port}{raw}")
-        } else {
-            raw.to_string()
-        }
-    };
-    let mut first_page: Option<String> = None;
-    for item in items {
-        let is_page = item
-            .key("type")
-            .and_then(|v| v.string())
-            .is_some_and(|t| t == "page");
-        if !is_page {
-            continue;
-        }
-        let resolved = if let Some(ws_url) = item
-            .key("webSocketDebuggerUrl")
-            .and_then(|v| v.string())
-            .and_then(|u| u.strip_prefix("ws://").or_else(|| u.strip_prefix("wss://")))
-        {
-            format!("devtools://devtools/bundled/inspector.html?ws={ws_url}")
-        } else if let Some(frontend) = item.key("devtoolsFrontendUrl").and_then(|v| v.string()) {
-            normalize(frontend)
-        } else {
-            continue;
-        };
-        let url_match = target_url.filter(|u| !u.is_empty()).is_some_and(|wanted| {
-            item.key("url")
-                .and_then(|v| v.string())
-                .is_some_and(|u| u == wanted)
-        });
-        if url_match {
-            return Some(resolved);
-        }
-        if first_page.is_none() {
-            first_page = Some(resolved);
-        }
-    }
-    first_page
 }
 
 pub fn is_local_html_url(url: &str) -> bool {
@@ -1061,38 +909,6 @@ pub fn is_local_html_url(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_devtools_frontend_url_matches_target_and_normalizes_relative_path() {
-        let json = r#"[
-            {"type":"service_worker","url":"https://a.test/sw.js","devtoolsFrontendUrl":"/devtools/inspector.html?ws=127.0.0.1:9222/sw"},
-            {"type":"page","url":"https://one.test/","devtoolsFrontendUrl":"/devtools/inspector.html?ws=127.0.0.1:9222/page/1"},
-            {"type":"page","url":"https://two.test/","devtoolsFrontendUrl":"/devtools/inspector.html?ws=127.0.0.1:9222/page/2"}
-        ]"#;
-        assert_eq!(
-            parse_devtools_frontend_url(json, Some("https://two.test/"), 9222).as_deref(),
-            Some("http://127.0.0.1:9222/devtools/inspector.html?ws=127.0.0.1:9222/page/2")
-        );
-        assert_eq!(
-            parse_devtools_frontend_url(json, Some("https://missing.test/"), 9222).as_deref(),
-            Some("http://127.0.0.1:9222/devtools/inspector.html?ws=127.0.0.1:9222/page/1")
-        );
-
-        let cef_json = r#"[ {
-   "description": "",
-   "devtoolsFrontendUrl": "https://chrome-devtools-frontend.appspot.com/serve_rev/@46876a0c2df3492ed67a8846950ba6d37170b58c/inspector.html?ws=127.0.0.1:52981/devtools/page/BF60A1449D2DA8687695C48D1E7076F0",
-   "id": "BF60A1449D2DA8687695C48D1E7076F0",
-   "title": "",
-   "type": "page",
-   "url": "data:text/html,\u003Ch1>hello\u003C/h1>",
-   "webSocketDebuggerUrl": "ws://127.0.0.1:52981/devtools/page/BF60A1449D2DA8687695C48D1E7076F0"
-} ]"#;
-        assert_eq!(
-            parse_devtools_frontend_url(cef_json, Some("data:text/html,<h1>hello</h1>"), 52981)
-                .as_deref(),
-            Some("devtools://devtools/bundled/inspector.html?ws=127.0.0.1:52981/devtools/page/BF60A1449D2DA8687695C48D1E7076F0")
-        );
-    }
 
     #[test]
     fn is_local_html_url_matches_file_html_only() {
