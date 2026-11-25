@@ -6,17 +6,17 @@ edition = "2021"
 [dependencies]
 koma-core = { path = "../koma-core" }
 koma-ipc = { path = "../koma-ipc" }
-makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "main" }
-makepad-browser-view = { git = "https://github.com/makepad/makepad", branch = "main" }
-makepad-app-terminal = { git = "https://github.com/makepad/makepad", branch = "main", default-features = false }
-makepad-micro-serde = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-widgets.workspace = true
+makepad-browser-view.workspace = true
+makepad-app-terminal.workspace = true
+makepad-micro-serde.workspace = true
 toml = "1.2.1"
 getrandom = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-makepad-apple-sys = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-apple-sys.workspace = true
 
 [dev-dependencies]
-makepad-app-host = { git = "https://github.com/makepad/makepad", branch = "main" }
-makepad-studio-protocol = { git = "https://github.com/makepad/makepad", branch = "main" }
-makepad-platform = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-app-host.workspace = true
+makepad-studio-protocol.workspace = true
+makepad-platform.workspace = true

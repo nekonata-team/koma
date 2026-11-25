@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "ab_glyph_rasterizer"
 version = "0.1.8"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "anstream"
@@ -60,22 +60,22 @@ dependencies = [
 [[package]]
 name = "bitflags"
 version = "2.10.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "bytemuck"
 version = "1.25.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "byteorder"
 version = "1.5.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "cfg-if"
 version = "1.0.4"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "cfg-if"
@@ -132,7 +132,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 [[package]]
 name = "downcast-rs"
 version = "1.2.1"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "equivalent"
@@ -143,12 +143,12 @@ checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 [[package]]
 name = "foldhash"
 version = "0.2.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "fxhash"
 version = "0.2.1"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "byteorder",
 ]
@@ -211,6 +211,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "koma-browser-host"
+version = "0.1.0"
+dependencies = [
+ "makepad-app-browser-host",
+]
+
+[[package]]
+name = "koma-cef-fetch"
+version = "0.1.0"
+dependencies = [
+ "makepad-cef-fetch",
+]
+
+[[package]]
 name = "koma-cli"
 version = "0.1.0"
 dependencies = [
@@ -239,7 +253,7 @@ checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 [[package]]
 name = "libloading"
 version = "0.8.9"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "cfg-if 1.0.4",
  "makepad-windows-sys",
@@ -248,13 +262,14 @@ dependencies = [
 [[package]]
 name = "makepad-a11y"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-ai-services"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
+ "makepad-base64",
  "makepad-micro-serde",
  "makepad-platform",
  "makepad-remote",
@@ -264,12 +279,17 @@ dependencies = [
 [[package]]
 name = "makepad-alloc-epoch"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
+
+[[package]]
+name = "makepad-alloc-phase"
+version = "1.0.0"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-android-state"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-jni-sys",
 ]
@@ -277,6 +297,7 @@ dependencies = [
 [[package]]
 name = "makepad-app-browser-host"
 version = "0.1.0"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-app-host",
  "makepad-browser-view",
@@ -287,7 +308,7 @@ dependencies = [
 [[package]]
 name = "makepad-app-host"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-app-registry",
  "makepad-error-log",
@@ -300,12 +321,12 @@ dependencies = [
 [[package]]
 name = "makepad-app-icons"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-app-registry"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-strict-json",
 ]
@@ -313,6 +334,7 @@ dependencies = [
 [[package]]
 name = "makepad-app-terminal"
 version = "0.1.0"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-ai-services",
  "makepad-app-registry",
@@ -326,7 +348,7 @@ dependencies = [
 [[package]]
 name = "makepad-apple-sys"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-objc-sys",
 ]
@@ -334,7 +356,7 @@ dependencies = [
 [[package]]
 name = "makepad-atspi"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-dbus-wire",
 ]
@@ -342,11 +364,12 @@ dependencies = [
 [[package]]
 name = "makepad-base64"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-browser-view"
 version = "0.1.0"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-app-host",
  "makepad-app-registry",
@@ -358,11 +381,12 @@ dependencies = [
 [[package]]
 name = "makepad-byteorder-lite"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-cef"
 version = "0.1.0"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "libloading",
  "makepad-alloc-epoch",
@@ -373,19 +397,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "makepad-cef-fetch"
+version = "0.1.0"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
+dependencies = [
+ "makepad-network",
+]
+
+[[package]]
 name = "makepad-cell-width"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
+
+[[package]]
+name = "makepad-cpu-budget"
+version = "1.0.0"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
+dependencies = [
+ "makepad-relax-api",
+]
 
 [[package]]
 name = "makepad-dbus-wire"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-derive-wasm-bridge"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-micro-proc-macro",
 ]
@@ -393,7 +433,7 @@ dependencies = [
 [[package]]
 name = "makepad-derive-widget"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-derive-widget-impl",
  "makepad-live-id",
@@ -403,7 +443,7 @@ dependencies = [
 [[package]]
 name = "makepad-derive-widget-impl"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-micro-proc-macro",
 ]
@@ -411,7 +451,7 @@ dependencies = [
 [[package]]
 name = "makepad-draw"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "fxhash",
  "makepad-font-core",
@@ -435,7 +475,7 @@ dependencies = [
 [[package]]
 name = "makepad-error-log"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-micro-serde",
 ]
@@ -443,12 +483,12 @@ dependencies = [
 [[package]]
 name = "makepad-fast-inflate"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-filesystem-watcher"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-git",
  "makepad-windows-sys",
@@ -457,7 +497,7 @@ dependencies = [
 [[package]]
 name = "makepad-font-core"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "ab_glyph_rasterizer",
  "fxhash",
@@ -472,12 +512,12 @@ dependencies = [
 [[package]]
 name = "makepad-futures"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-gif"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "weezl",
 ]
@@ -485,7 +525,7 @@ dependencies = [
 [[package]]
 name = "makepad-git"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-fast-inflate",
 ]
@@ -493,7 +533,7 @@ dependencies = [
 [[package]]
 name = "makepad-gizmo"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-math",
 ]
@@ -501,16 +541,18 @@ dependencies = [
 [[package]]
 name = "makepad-gpu-trace"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-hal"
 version = "1.0.0"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "fxhash",
  "makepad-a11y",
  "makepad-apple-sys",
  "makepad-atspi",
+ "makepad-cpu-budget",
  "makepad-dbus-wire",
  "makepad-font-core",
  "makepad-gpu-trace",
@@ -532,7 +574,7 @@ dependencies = [
 [[package]]
 name = "makepad-html"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-live-id",
 ]
@@ -540,12 +582,17 @@ dependencies = [
 [[package]]
 name = "makepad-jni-sys"
 version = "0.4.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
+
+[[package]]
+name = "makepad-jobs"
+version = "1.0.0"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-key-code"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-micro-serde",
 ]
@@ -553,7 +600,7 @@ dependencies = [
 [[package]]
 name = "makepad-latex-math"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "ttf-parser",
 ]
@@ -561,7 +608,7 @@ dependencies = [
 [[package]]
 name = "makepad-live-id"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-live-id-macros",
  "makepad-relax-api",
@@ -570,7 +617,7 @@ dependencies = [
 [[package]]
 name = "makepad-live-id-macros"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-live-id-macros-impl",
 ]
@@ -578,7 +625,7 @@ dependencies = [
 [[package]]
 name = "makepad-live-id-macros-impl"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-micro-proc-macro",
 ]
@@ -586,7 +633,7 @@ dependencies = [
 [[package]]
 name = "makepad-live-reload-core"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-filesystem-watcher",
 ]
@@ -594,7 +641,7 @@ dependencies = [
 [[package]]
 name = "makepad-math"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "bytemuck",
  "makepad-micro-serde",
@@ -603,12 +650,12 @@ dependencies = [
 [[package]]
 name = "makepad-micro-proc-macro"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-micro-serde"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-live-id",
  "makepad-micro-serde-derive",
@@ -617,7 +664,7 @@ dependencies = [
 [[package]]
 name = "makepad-micro-serde-derive"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-micro-proc-macro",
  "makepad-micro-serde-derive-impl",
@@ -626,7 +673,7 @@ dependencies = [
 [[package]]
 name = "makepad-micro-serde-derive-impl"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-micro-proc-macro",
 ]
@@ -634,7 +681,7 @@ dependencies = [
 [[package]]
 name = "makepad-network"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-apple-sys",
  "makepad-error-log",
@@ -646,12 +693,12 @@ dependencies = [
 [[package]]
 name = "makepad-objc-sys"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-platform"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "bitflags",
  "foldhash",
@@ -659,6 +706,7 @@ dependencies = [
  "makepad-alloc-epoch",
  "makepad-android-state",
  "makepad-apple-sys",
+ "makepad-cpu-budget",
  "makepad-futures",
  "makepad-gpu-trace",
  "makepad-hal",
@@ -690,7 +738,7 @@ dependencies = [
 [[package]]
 name = "makepad-platform-video"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-apple-sys",
  "makepad-hal",
@@ -701,7 +749,7 @@ dependencies = [
 [[package]]
 name = "makepad-prof-stream"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-gpu-trace",
  "makepad-strict-json",
@@ -710,25 +758,26 @@ dependencies = [
 [[package]]
 name = "makepad-regex"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-relax"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-relax-api"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
+ "makepad-alloc-phase",
  "makepad-relax-api-macro",
 ]
 
 [[package]]
 name = "makepad-relax-api-macro"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-relax-api-macro-impl",
 ]
@@ -736,7 +785,7 @@ dependencies = [
 [[package]]
 name = "makepad-relax-api-macro-impl"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-micro-proc-macro",
 ]
@@ -744,7 +793,7 @@ dependencies = [
 [[package]]
 name = "makepad-remote"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-network",
  "makepad-strict-json",
@@ -755,7 +804,7 @@ dependencies = [
 [[package]]
 name = "makepad-script"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-error-log",
  "makepad-html",
@@ -772,7 +821,7 @@ dependencies = [
 [[package]]
 name = "makepad-script-census"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-relax-api",
  "makepad-script",
@@ -781,7 +830,7 @@ dependencies = [
 [[package]]
 name = "makepad-script-derive"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-micro-proc-macro",
  "makepad-script-derive-impl",
@@ -790,7 +839,7 @@ dependencies = [
 [[package]]
 name = "makepad-script-derive-impl"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-micro-proc-macro",
 ]
@@ -798,7 +847,7 @@ dependencies = [
 [[package]]
 name = "makepad-script-std"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-live-id",
  "makepad-network",
@@ -809,7 +858,7 @@ dependencies = [
 [[package]]
 name = "makepad-shader"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-live-id",
  "makepad-relax-api",
@@ -818,22 +867,22 @@ dependencies = [
 [[package]]
 name = "makepad-shared-bytes"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-stack"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-strict-json"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-studio-protocol"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "bitflags",
  "makepad-error-log",
@@ -845,7 +894,7 @@ dependencies = [
 [[package]]
 name = "makepad-svg"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-html",
  "makepad-live-id",
@@ -854,12 +903,12 @@ dependencies = [
 [[package]]
 name = "makepad-toml-parser"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-tsdf"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-math",
  "makepad-micro-serde",
@@ -868,17 +917,17 @@ dependencies = [
 [[package]]
 name = "makepad-tween"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-vulkan"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-wasm-bridge"
 version = "1.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-derive-wasm-bridge",
  "makepad-live-id",
@@ -887,12 +936,12 @@ dependencies = [
 [[package]]
 name = "makepad-web-manifest"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-webp"
 version = "0.2.4"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-byteorder-lite",
 ]
@@ -900,7 +949,7 @@ dependencies = [
 [[package]]
 name = "makepad-widgets"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-widgets-catalog",
  "makepad-widgets-collections",
@@ -919,7 +968,7 @@ dependencies = [
 [[package]]
 name = "makepad-widgets-catalog"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-widgets-core",
 ]
@@ -927,7 +976,7 @@ dependencies = [
 [[package]]
 name = "makepad-widgets-collections"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-widgets-core",
 ]
@@ -935,11 +984,12 @@ dependencies = [
 [[package]]
 name = "makepad-widgets-core"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-app-icons",
  "makepad-derive-widget",
  "makepad-draw",
+ "makepad-jobs",
  "makepad-tween",
  "ttf-parser",
  "unicode-segmentation",
@@ -948,7 +998,7 @@ dependencies = [
 [[package]]
 name = "makepad-widgets-data"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-widgets-core",
 ]
@@ -956,7 +1006,7 @@ dependencies = [
 [[package]]
 name = "makepad-widgets-editors"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-gizmo",
  "makepad-widgets-core",
@@ -965,7 +1015,7 @@ dependencies = [
 [[package]]
 name = "makepad-widgets-extras"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-widgets-core",
 ]
@@ -973,7 +1023,7 @@ dependencies = [
 [[package]]
 name = "makepad-widgets-fab"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-widgets-core",
 ]
@@ -981,7 +1031,7 @@ dependencies = [
 [[package]]
 name = "makepad-widgets-hotkeys"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-widgets-core",
 ]
@@ -989,7 +1039,7 @@ dependencies = [
 [[package]]
 name = "makepad-widgets-media"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-widgets-core",
 ]
@@ -997,7 +1047,7 @@ dependencies = [
 [[package]]
 name = "makepad-widgets-menus"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-widgets-core",
 ]
@@ -1005,7 +1055,7 @@ dependencies = [
 [[package]]
 name = "makepad-widgets-pickers"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-widgets-core",
 ]
@@ -1013,7 +1063,7 @@ dependencies = [
 [[package]]
 name = "makepad-widgets-rich-text"
 version = "2.0.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-base64",
  "makepad-html",
@@ -1026,12 +1076,12 @@ dependencies = [
 [[package]]
 name = "makepad-windows-sys"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-wm-api"
 version = "0.1.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-app-registry",
  "makepad-widgets-core",
@@ -1040,7 +1090,7 @@ dependencies = [
 [[package]]
 name = "makepad-zune-bmp"
 version = "0.5.2"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-error-log",
  "makepad-zune-core",
@@ -1049,12 +1099,12 @@ dependencies = [
 [[package]]
 name = "makepad-zune-core"
 version = "0.5.1"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "makepad-zune-inflate"
 version = "0.2.54"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "simd-adler32",
 ]
@@ -1062,7 +1112,7 @@ dependencies = [
 [[package]]
 name = "makepad-zune-jpeg"
 version = "0.5.15"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-zune-core",
 ]
@@ -1070,7 +1120,7 @@ dependencies = [
 [[package]]
 name = "makepad-zune-png"
 version = "0.5.2"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-fast-inflate",
  "makepad-zune-core",
@@ -1080,7 +1130,7 @@ dependencies = [
 [[package]]
 name = "makepad-zune-qoi"
 version = "0.5.2"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-zune-core",
 ]
@@ -1088,7 +1138,7 @@ dependencies = [
 [[package]]
 name = "memchr"
 version = "2.7.6"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "once_cell_polyfill"
@@ -1099,7 +1149,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "pkg-config"
 version = "0.3.32"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "proc-macro2"
@@ -1113,7 +1163,7 @@ dependencies = [
 [[package]]
 name = "pulldown-cmark"
 version = "0.12.2"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "bitflags",
  "memchr",
@@ -1138,7 +1188,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 [[package]]
 name = "rustybuzz"
 version = "0.18.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "bitflags",
  "bytemuck",
@@ -1154,12 +1204,12 @@ dependencies = [
 [[package]]
 name = "scoped-tls"
 version = "1.0.1"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "sdfer"
 version = "0.2.1"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "serde_core"
@@ -1193,12 +1243,12 @@ dependencies = [
 [[package]]
 name = "simd-adler32"
 version = "0.3.9"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "smallvec"
 version = "1.15.1"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "smallvec"
@@ -1265,27 +1315,27 @@ checksum = "009dbb7700f11c55ef83aebbe4c0e9cf1f1ac0844bd8d6f00dc38f302026e13a"
 [[package]]
 name = "ttf-parser"
 version = "0.24.1"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "unicase"
 version = "2.9.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "unicode-bidi"
 version = "0.3.18"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "unicode-bidi-mirroring"
 version = "0.3.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "unicode-ccc"
 version = "0.3.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "unicode-ident"
@@ -1296,17 +1346,17 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 [[package]]
 name = "unicode-properties"
 version = "0.1.4"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "unicode-script"
 version = "0.5.8"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "unicode-segmentation"
 version = "1.12.0"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "utf8parse"
@@ -1317,7 +1367,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "wayland-backend"
 version = "0.3.12"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "downcast-rs",
  "scoped-tls",
@@ -1328,7 +1378,7 @@ dependencies = [
 [[package]]
 name = "wayland-client"
 version = "0.31.12"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "bitflags",
  "wayland-backend",
@@ -1338,7 +1388,7 @@ dependencies = [
 [[package]]
 name = "wayland-protocols"
 version = "0.32.10"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "bitflags",
  "wayland-backend",
@@ -1348,7 +1398,7 @@ dependencies = [
 [[package]]
 name = "wayland-sys"
 version = "0.31.8"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 dependencies = [
  "makepad-error-log",
  "pkg-config",
@@ -1357,7 +1407,7 @@ dependencies = [
 [[package]]
 name = "weezl"
 version = "0.1.12"
-source = "git+https://github.com/makepad/makepad?branch=main#506ec05105b9adb08d1d21f9879df181b5244ea7"
+source = "git+https://github.com/tyPhoon-collab/makepad?rev=27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e#27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e"
 
 [[package]]
 name = "windows-link"

@@ -5,7 +5,7 @@
 ## Cargo の依存境界
 
 [ルートの Cargo.toml](Cargo.toml) はワークスペースを定義する。
-Koma のコードは、それぞれに `Cargo.toml` を持つ4パッケージに分かれる。
+Koma のアプリと CLI は4つのパッケージに分かれる。`koma-browser-host` と `koma-cef-fetch` は、同じ Makepad フォークを参照する起動用パッケージ。
 下図の矢印は主なビルド時の依存を表す。
 
 ```mermaid
@@ -35,7 +35,7 @@ flowchart LR
 
 - **Profile**：永続 Profile ごとに GUI プロセスを持ち、状態とブラウザデータを分離する。[Profile の保存先](crates/koma-app/src/runtime/profiles.rs) のロックで二重起動を防ぎ、起動済みの Profile には専用の IPC エンドポイントで前面表示を依頼する。
 - **CLI**：[IPC クライアント](crates/koma-ipc/src/transport.rs) がリクエストを送り、GUI 側の [IPC サーバー](crates/koma-app/src/runtime/ipc_server.rs) が受け取る。サーバーはキューと `SignalToUI` で UI スレッドに処理を渡す。
-- **Web Koma**：[WebViewRuntime](crates/koma-app/src/runtime/web_views.rs) が `makepad-browser-view` を使う。[browser-view](vendor/makepad-browser-view/src/lib.rs) は最初のビューを開くときに別プロセスの Browser Host を起動し、共有テクスチャ経由でフレームを受け取る。
-- **Terminal Koma**：[SheetStrip](crates/koma-app/src/ui/sheet_strip.rs) が GUI プロセス内に `MpTerm` を持つ。[ターミナルセッション](vendor/makepad-app-terminal/src/session.rs) はシェルまたはコマンドを子プロセスとして起動し、PTY 経由で入出力する。
+- **Web Koma**：[WebViewRuntime](crates/koma-app/src/runtime/web_views.rs) が `makepad-browser-view` を使う。`makepad-browser-view` は最初のビューを開くときに別プロセスの Browser Host を起動し、共有テクスチャ経由でフレームを受け取る。
+- **Terminal Koma**：[SheetStrip](crates/koma-app/src/ui/sheet_strip.rs) が GUI プロセス内に `MpTerm` を持つ。`makepad-app-terminal` のターミナルセッション はシェルまたはコマンドを子プロセスとして起動し、PTY 経由で入出力する。
 
 GUI の起動は [`main.rs`](crates/koma-app/src/main.rs) の `app_main!(App)` から [`App`](crates/koma-app/src/ui/app/mod.rs) を経由して、[初期化処理](crates/koma-app/src/ui/app/lifecycle.rs) に進む。

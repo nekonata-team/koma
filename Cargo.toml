@@ -5,7 +5,8 @@ members = [
     "crates/koma-cli",
     "crates/koma-core",
     "crates/koma-ipc",
-    "vendor/makepad-app-browser-host",
+    "crates/koma-browser-host",
+    "crates/koma-cef-fetch",
 ]
 default-members = [
     "crates/koma-app",
@@ -14,8 +15,15 @@ default-members = [
     "crates/koma-ipc",
 ]
 
-[patch."https://github.com/makepad/makepad"]
-makepad-browser-view = { path = "vendor/makepad-browser-view" }
-makepad-app-terminal = { path = "vendor/makepad-app-terminal" }
-makepad-hal = { path = "vendor/makepad-hal" }
-makepad-cef = { path = "vendor/makepad-cef" }
+[workspace.dependencies]
+# Keep every Makepad crate on the same reviewed fork commit.
+makepad-app-browser-host = { git = "https://github.com/tyPhoon-collab/makepad", rev = "27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e" }
+makepad-app-host = { git = "https://github.com/tyPhoon-collab/makepad", rev = "27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e" }
+makepad-app-terminal = { git = "https://github.com/tyPhoon-collab/makepad", rev = "27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e", default-features = false }
+makepad-apple-sys = { git = "https://github.com/tyPhoon-collab/makepad", rev = "27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e" }
+makepad-browser-view = { git = "https://github.com/tyPhoon-collab/makepad", rev = "27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e" }
+makepad-cef-fetch = { git = "https://github.com/tyPhoon-collab/makepad", rev = "27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e" }
+makepad-micro-serde = { git = "https://github.com/tyPhoon-collab/makepad", rev = "27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e" }
+makepad-platform = { git = "https://github.com/tyPhoon-collab/makepad", rev = "27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e" }
+makepad-studio-protocol = { git = "https://github.com/tyPhoon-collab/makepad", rev = "27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e" }
+makepad-widgets = { git = "https://github.com/tyPhoon-collab/makepad", rev = "27b8e9af5eb0c1a8b19418bf5a3ab94aec7c8a0e" }

@@ -25,6 +25,7 @@ allow = [
     "windows-link",
     "windows-sys",
     # makepad-micro-serde and its transitive dependencies (no GUI)
+    "makepad-alloc-phase",
     "makepad-live-id",
     "makepad-live-id-macros",
     "makepad-live-id-macros-impl",

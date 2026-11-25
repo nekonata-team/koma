@@ -129,4 +129,4 @@ export default async ({ snapshot }) => {
 `koma web eval` には末尾のセミコロンを省いた JavaScript 式を渡してください。
 `Promise` の完了を待つ処理には `koma web script` を使えます。
 
-同梱コードの出典とライセンスは [vendor/README.md](./vendor/README.md) を参照してください。
+同梱コードの出典とライセンスは [依存ライブラリの出典](./docs/development.md#依存ライブラリの出典) を参照してください。

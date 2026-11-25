@@ -1,24 +1,19 @@
 set shell := ["zsh", "-cu"]
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
-_koma_packages := "-p koma-app -p koma-cli -p koma-core -p koma-ipc"
+_koma_packages := "-p koma-app -p koma-cli -p koma-core -p koma-ipc -p koma-browser-host -p koma-cef-fetch"
 
 # レシピ一覧を表示する
 default:
     @just --list
 
 # CEF ランタイムを取得・展開する
-[unix]
 cef-fetch:
-    rev=$(awk '/^name = "makepad-widgets"/{f=1;next} f && /^source = /{sub(/.*#/,""); print substr($0,1,7); exit}' Cargo.lock) && cargo run --manifest-path "${CARGO_HOME:-$HOME/.cargo}"/git/checkouts/makepad-*/"$rev"/Cargo.toml -p makepad-cef-fetch -- --fetch
-
-[windows]
-cef-fetch:
-    $rev = (Select-String -Path Cargo.lock -Pattern 'name = "makepad-widgets"' -Context 0,2 | ForEach-Object { if ($_.Context.PostContext -join "`n" -match '#([0-9a-f]{7})') { $Matches[1] } } | Select-Object -First 1); $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }; $manifest = Get-Item (Join-Path $cargoHome "git\checkouts\makepad-*\$rev\Cargo.toml") | Select-Object -First 1 -ExpandProperty FullName; cargo run --manifest-path $manifest -p makepad-cef-fetch -- --fetch
+    cargo run --locked -p koma-cef-fetch -- --fetch
 
 # browser_host をビルドする
 cef-host:
-    cargo build -p makepad-app-browser-host
+    cargo build --locked -p koma-browser-host
 
 # CEF の取得と browser_host のビルドをまとめて行う
 setup: cef-fetch cef-host
@@ -41,7 +36,7 @@ run: bundle-macos
 [linux]
 [windows]
 run:
-    cargo build -p makepad-app-browser-host
+    cargo build --locked -p koma-browser-host
     cargo run -p koma-app
 
 # Private Workspace で起動する
@@ -52,19 +47,19 @@ private: bundle-macos
 # Private Workspace で起動する
 [linux]
 private:
-    cargo build -p makepad-app-browser-host
+    cargo build --locked -p koma-browser-host
     env -u KOMA_SOCKET cargo run -p koma-app -- --private
 
 # Private Workspace で起動する
 [windows]
 private:
-    cargo build -p makepad-app-browser-host
+    cargo build --locked -p koma-browser-host
     Remove-Item Env:KOMA_SOCKET -ErrorAction SilentlyContinue; cargo run -p koma-app -- --private
 
 # macOS の開発用 Koma.app を作成する（CEF は just setup で取得）
 [macos]
 bundle-macos:
-    cargo build --locked -p koma-app -p makepad-app-browser-host
+    cargo build --locked -p koma-app -p koma-browser-host
     bin="${CARGO_TARGET_DIR:-target}/debug"; contents="$bin/Koma.app/Contents"; \
         mkdir -p "$contents/MacOS" && \
         install -CS -m 644 crates/koma-app/macos/Info.plist "$contents/" && \
@@ -91,7 +86,7 @@ deny:
     cargo deny --locked --all-features --manifest-path crates/koma-cli/Cargo.toml --config checks/deny-headless.toml check bans
     cargo deny --locked --all-features --manifest-path crates/koma-ipc/Cargo.toml --config checks/deny-headless.toml check bans
     cargo deny --locked --all-features --manifest-path crates/koma-app/Cargo.toml --config checks/deny-app.toml check bans
-    cargo deny --locked --all-features --manifest-path vendor/makepad-app-browser-host/Cargo.toml --config checks/deny-browser-host.toml check bans
+    cargo deny --locked --all-features --manifest-path crates/koma-browser-host/Cargo.toml --config checks/deny-browser-host.toml check bans
     cargo deny --locked --all-features check sources
 
 # Koma の整形、lint、依存境界を検査する

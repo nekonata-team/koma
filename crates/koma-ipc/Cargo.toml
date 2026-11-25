@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-makepad-micro-serde = { git = "https://github.com/makepad/makepad", branch = "main" }
+makepad-micro-serde.workspace = true
