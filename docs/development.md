@@ -40,6 +40,9 @@ Browser Host と CEF 取得ツールも同じコミットを参照し、Koma の
 Makepad 側の独自変更は、同時に更新が必要なクレートを1コミットにまとめます。
 上流を取り込んだマージコミットと、Koma の固定先を更新する変更を履歴に残します。
 
+push 前に手元の Makepad チェックアウトで動作確認する場合は、`MAKEPAD_DIR=/path/to/makepad just makepad check` のように実行します。
+実行時は `Cargo.lock` が一時変更されるため、確認後に `git checkout -- Cargo.lock` で戻します。
+
 ## 依存ライブラリの出典
 
 - [Makepad](https://github.com/makepad/makepad) は [MIT ライセンス](https://github.com/tyPhoon-collab/makepad/blob/koma/main/LICENSE) で提供されています。
