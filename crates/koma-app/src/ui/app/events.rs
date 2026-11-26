@@ -19,6 +19,26 @@ use super::lifecycle;
 use super::web_dialogs::WebModalRequest;
 use super::{App, PromptMode};
 
+fn sync_handled_key_down(
+    handled_keys: &mut Vec<KeyCode>,
+    key_code: KeyCode,
+    is_repeat: bool,
+    forwarded: bool,
+) -> bool {
+    // Only suppress repeats of a previously handled shortcut; macOS Cmd+key may omit KeyUp.
+    let already_handled = is_repeat && handled_keys.contains(&key_code);
+    if already_handled || !forwarded {
+        if !handled_keys.contains(&key_code) {
+            handled_keys.push(key_code);
+        }
+        return true;
+    }
+    if !is_repeat {
+        handled_keys.retain(|code| *code != key_code);
+    }
+    false
+}
+
 fn open_external_app_url(url: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let mut cmd = {
@@ -259,11 +279,12 @@ impl App {
             Self::map_key(ke),
             &self.config.keybindings,
         );
-        let already_handled = self.handled_keys.contains(&ke.key_code);
-        if already_handled || !matches!(decision, RouteDecision::Forward) {
-            if !already_handled {
-                self.handled_keys.push(ke.key_code);
-            }
+        if sync_handled_key_down(
+            &mut self.handled_keys,
+            ke.key_code,
+            ke.is_repeat,
+            matches!(decision, RouteDecision::Forward),
+        ) {
             self.suppress_text_input = !ke.modifiers.control
                 && !ke.modifiers.alt
                 && !ke.modifiers.logo
@@ -654,5 +675,34 @@ impl AppMain for App {
         }
 
         self.sync_focus_from_ui(cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn handled_key_suppresses_repeats_but_not_fresh_press_after_missed_key_up() {
+        let mut handled = Vec::new();
+        assert!(sync_handled_key_down(
+            &mut handled,
+            KeyCode::KeyL,
+            false,
+            false
+        ));
+        assert!(sync_handled_key_down(
+            &mut handled,
+            KeyCode::KeyL,
+            true,
+            true
+        ));
+        assert!(!sync_handled_key_down(
+            &mut handled,
+            KeyCode::KeyL,
+            false,
+            true
+        ));
+        assert!(handled.is_empty());
     }
 }

@@ -116,6 +116,7 @@ impl WebKoma {
         let ready = self.draw_bg.area().is_valid(cx);
         cx.set_key_focus(self.draw_bg.area());
         self.with_runtime(|rt| rt.focus_koma(cx, self.koma_id.as_ref()));
+        self.redraw(cx);
         ready
     }
 
@@ -172,8 +173,10 @@ impl Widget for WebKoma {
                 self.with_runtime(|rt| rt.focus_koma(cx, Some(bid)));
                 self.redraw(cx);
             }
-            Hit::KeyFocusLost(_) => {
-                cx.hide_text_ime();
+            Hit::KeyFocusLost(kf) => {
+                if kf.focus == Area::Empty {
+                    cx.hide_text_ime();
+                }
                 self.with_runtime(|rt| {
                     rt.views_mut().send(view_id, ViewOp::CaptureLost);
                     rt.views_mut().send(view_id, ViewOp::Focus { on: false });

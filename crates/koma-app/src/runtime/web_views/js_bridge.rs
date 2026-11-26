@@ -231,6 +231,7 @@ mod tests {
             build_koma_click_expr("#btn"),
             build_koma_fill_expr("input", "hello\nworld"),
             build_koma_api_inject_expr(),
+            build_web_navigation_inject_expr(),
         ] {
             let t = expr.trim();
             assert!(!t.ends_with(';'));

@@ -68,7 +68,7 @@ struct KomaViewState {
     hidden: Option<bool>,
     koma_api_enabled: bool,
     koma_api_injected_url: Option<String>,
-    web_nav_injected_url: Option<String>,
+    web_nav_injected_epoch: Option<u64>,
     last_observed_url: Option<String>,
 }
 
@@ -191,10 +191,16 @@ impl WebViewRuntime {
                 eprintln!("Could not initialize Web notifications: {err}");
             })
             .ok();
-        let script = bridge.as_ref().map(NotificationBridge::script);
-        let id = self
-            .views
-            .open_with_document_script(url, true, 0xff10_1521, script)?;
+        let mut document_script = String::new();
+        if let Some(bridge) = bridge.as_ref() {
+            document_script.push_str(&bridge.script());
+            document_script.push('\n');
+        }
+        document_script.push_str(&build_web_navigation_inject_expr());
+        document_script.push(';');
+        let id =
+            self.views
+                .open_with_document_script(url, true, 0xff10_1521, Some(document_script))?;
         if let Some(bridge) = bridge {
             self.notification_bridges.insert(id, bridge);
         }
@@ -706,8 +712,10 @@ impl WebViewRuntime {
         for id in ids {
             let koma_id_opt = self.view_to_koma.get(&id).cloned();
             if let Some(koma_id) = &koma_id_opt {
-                if let Some((loading, url)) =
-                    self.views.state(id).map(|s| (s.loading, s.url.clone()))
+                if let Some((loading, url, epoch)) = self
+                    .views
+                    .state(id)
+                    .map(|s| (s.loading, s.url.clone(), s.navigation_epoch))
                 {
                     if !loading && !url.is_empty() {
                         let state = self.koma_states.entry(koma_id.clone()).or_default();
@@ -718,8 +726,8 @@ impl WebViewRuntime {
                                 .push((koma_id.clone(), url.clone()));
                             changed = true;
                         }
-                        if state.web_nav_injected_url.as_deref() != Some(url.as_str()) {
-                            state.web_nav_injected_url = Some(url.clone());
+                        if state.web_nav_injected_epoch != Some(epoch) {
+                            state.web_nav_injected_epoch = Some(epoch);
                             let expr = build_web_navigation_inject_expr();
                             self.views.evaluate(id, &expr);
                             self.views.service(cx);

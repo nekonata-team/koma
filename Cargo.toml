@@ -17,13 +17,13 @@ default-members = [
 
 [workspace.dependencies]
 # Keep every Makepad crate on the same reviewed fork commit.
-makepad-app-browser-host = { git = "https://github.com/tyPhoon-collab/makepad", rev = "b3061b9df5defcb5c2fba201645e08dbdfd0b218" }
-makepad-app-host = { git = "https://github.com/tyPhoon-collab/makepad", rev = "b3061b9df5defcb5c2fba201645e08dbdfd0b218" }
-makepad-app-terminal = { git = "https://github.com/tyPhoon-collab/makepad", rev = "b3061b9df5defcb5c2fba201645e08dbdfd0b218", default-features = false }
-makepad-apple-sys = { git = "https://github.com/tyPhoon-collab/makepad", rev = "b3061b9df5defcb5c2fba201645e08dbdfd0b218" }
-makepad-browser-view = { git = "https://github.com/tyPhoon-collab/makepad", rev = "b3061b9df5defcb5c2fba201645e08dbdfd0b218" }
-makepad-cef-fetch = { git = "https://github.com/tyPhoon-collab/makepad", rev = "b3061b9df5defcb5c2fba201645e08dbdfd0b218" }
-makepad-micro-serde = { git = "https://github.com/tyPhoon-collab/makepad", rev = "b3061b9df5defcb5c2fba201645e08dbdfd0b218" }
-makepad-platform = { git = "https://github.com/tyPhoon-collab/makepad", rev = "b3061b9df5defcb5c2fba201645e08dbdfd0b218" }
-makepad-studio-protocol = { git = "https://github.com/tyPhoon-collab/makepad", rev = "b3061b9df5defcb5c2fba201645e08dbdfd0b218" }
-makepad-widgets = { git = "https://github.com/tyPhoon-collab/makepad", rev = "b3061b9df5defcb5c2fba201645e08dbdfd0b218" }
+makepad-app-browser-host = { git = "https://github.com/tyPhoon-collab/makepad", rev = "1da671d391ab24923d9a6e17089f16df1adefa0e" }
+makepad-app-host = { git = "https://github.com/tyPhoon-collab/makepad", rev = "1da671d391ab24923d9a6e17089f16df1adefa0e" }
+makepad-app-terminal = { git = "https://github.com/tyPhoon-collab/makepad", rev = "1da671d391ab24923d9a6e17089f16df1adefa0e", default-features = false }
+makepad-apple-sys = { git = "https://github.com/tyPhoon-collab/makepad", rev = "1da671d391ab24923d9a6e17089f16df1adefa0e" }
+makepad-browser-view = { git = "https://github.com/tyPhoon-collab/makepad", rev = "1da671d391ab24923d9a6e17089f16df1adefa0e" }
+makepad-cef-fetch = { git = "https://github.com/tyPhoon-collab/makepad", rev = "1da671d391ab24923d9a6e17089f16df1adefa0e" }
+makepad-micro-serde = { git = "https://github.com/tyPhoon-collab/makepad", rev = "1da671d391ab24923d9a6e17089f16df1adefa0e" }
+makepad-platform = { git = "https://github.com/tyPhoon-collab/makepad", rev = "1da671d391ab24923d9a6e17089f16df1adefa0e" }
+makepad-studio-protocol = { git = "https://github.com/tyPhoon-collab/makepad", rev = "1da671d391ab24923d9a6e17089f16df1adefa0e" }
+makepad-widgets = { git = "https://github.com/tyPhoon-collab/makepad", rev = "1da671d391ab24923d9a6e17089f16df1adefa0e" }

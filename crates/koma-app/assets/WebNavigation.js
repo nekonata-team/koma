@@ -126,21 +126,26 @@
     function isRenderedAndEnabled(element) {
       if (element.matches(":disabled") || element.getAttribute("aria-disabled") === "true")
         return false;
-      let ancestor = element;
-      while (ancestor) {
-        const style = getComputedStyle(ancestor);
-        if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0")
+      if (typeof element.checkVisibility === "function") {
+        if (!element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))
           return false;
-        ancestor = ancestor.parentElement;
+      } else {
+        let ancestor = element;
+        while (ancestor) {
+          const style = getComputedStyle(ancestor);
+          if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0")
+            return false;
+          ancestor = ancestor.parentElement;
+        }
       }
       const rect = element.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0;
     }
     function isVisibleAndEnabled(element) {
-      if (!isRenderedAndEnabled(element))
-        return false;
       const rect = element.getBoundingClientRect();
-      return rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
+      if (rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth)
+        return false;
+      return isRenderedAndEnabled(element);
     }
     function isActivateTarget(element) {
       const isNativeTarget = element.matches(nativeActionableSelector);
@@ -186,11 +191,13 @@
       closeHelp();
     }
     function isScrollableElement(element, axis) {
-      const style = getComputedStyle(element);
-      const overflow = axis === "x" ? style.overflowX : style.overflowY;
       const scrollSize = axis === "x" ? element.scrollWidth : element.scrollHeight;
       const clientSize = axis === "x" ? element.clientWidth : element.clientHeight;
-      return /(auto|scroll)/.test(overflow) && scrollSize > clientSize;
+      if (scrollSize <= clientSize)
+        return false;
+      const style = getComputedStyle(element);
+      const overflow = axis === "x" ? style.overflowX : style.overflowY;
+      return /(auto|scroll)/.test(overflow);
     }
     function openHints(action) {
       closeHints();
@@ -206,8 +213,9 @@
         return configuration.accepts(target);
       });
       const scrollableTargets = action === "activate" ? Array.from(document.querySelectorAll("*")).filter((target) => {
-        return target !== document.scrollingElement && !target.matches(actionableSelector) && isVisibleAndEnabled(target) && (isScrollableElement(target, "x") || isScrollableElement(target, "y"));
+        return target !== document.scrollingElement && (target.scrollHeight > target.clientHeight || target.scrollWidth > target.clientWidth) && !target.matches(actionableSelector) && isVisibleAndEnabled(target) && (isScrollableElement(target, "x") || isScrollableElement(target, "y"));
       }) : [];
+      const scrollableSet = new Set(scrollableTargets);
       targets.push(...scrollableTargets);
       if (targets.length === 0)
         return;
@@ -224,7 +232,7 @@
         const rect = target.getBoundingClientRect();
         const marker = document.createElement("span");
         marker.textContent = targetLabels[index];
-        const scrollable = scrollableTargets.includes(target);
+        const scrollable = scrollableSet.has(target);
         Object.assign(marker.style, {
           position: "fixed",
           left: `${Math.max(0, rect.left)}px`,
@@ -303,7 +311,7 @@
     function documentScrollTarget() {
       return document.scrollingElement;
     }
-    function scrollRelative(axis, direction, amount, count = 1) {
+    function scrollRelative(axis, direction, amount, count = 1, instant = false) {
       const target = scrollTarget(axis);
       if (!target)
         return;
@@ -311,7 +319,7 @@
       target.scrollBy({
         left: axis === "x" ? direction * distance : 0,
         top: axis === "y" ? direction * distance : 0,
-        behavior: reduceMotion ? "auto" : "smooth"
+        behavior: instant || reduceMotion ? "auto" : "smooth"
       });
     }
     function scrollToEdge(axis, end) {
@@ -739,22 +747,22 @@
       const count = takeCount();
       switch (key) {
         case "j":
-          scrollRelative("y", 1, 60 * count);
+          scrollRelative("y", 1, 60 * count, 1, event.repeat);
           break;
         case "k":
-          scrollRelative("y", -1, 60 * count);
+          scrollRelative("y", -1, 60 * count, 1, event.repeat);
           break;
         case "d":
-          scrollRelative("y", 1, "half", count);
+          scrollRelative("y", 1, "half", count, event.repeat);
           break;
         case "u":
-          scrollRelative("y", -1, "half", count);
+          scrollRelative("y", -1, "half", count, event.repeat);
           break;
         case "h":
-          scrollRelative("x", -1, 60 * count);
+          scrollRelative("x", -1, 60 * count, 1, event.repeat);
           break;
         case "l":
-          scrollRelative("x", 1, 60 * count);
+          scrollRelative("x", 1, 60 * count, 1, event.repeat);
           break;
         case "0":
           scrollToEdge("x", false);
