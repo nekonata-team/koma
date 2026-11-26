@@ -3,6 +3,25 @@
 Koma は、ターミナルと Web ページを同じキャンバスに並べて使うアプリです。
 ターミナルや Web ページを表示する各パネルを **Koma** と呼び、それらを **Sheet** にまとめて切り替えられます。
 
+## インストール（macOS Apple Silicon）
+
+[GitHub Releases](https://github.com/nekonata-team/koma/releases) から `Koma-<version>-arm64.zip` をダウンロードして展開し、`Koma.app` を `アプリケーション` フォルダへ入れてください。
+CLI（`koma`）は `Koma.app/Contents/MacOS/koma` に同梱されています。
+
+### Nix Flakes（`aarch64-darwin`）
+
+```nix
+# flake.nix
+inputs.koma.url = "github:nekonata-team/koma";
+```
+
+```nix
+# nix-darwin（Home Manager では home.packages）
+environment.systemPackages = [
+  inputs.koma.packages.aarch64-darwin.default
+];
+```
+
 ## 基本操作
 
 | 操作 | キー |

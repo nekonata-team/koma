@@ -141,6 +141,7 @@ prepare version:
     ditto -c -k --sequesterRsrc --keepParent "{{_app_dir}}" "$zip"
 
     sri="sha256-$(openssl dgst -sha256 -binary "$zip" | openssl base64 -A)"
+    perl -i -pe "s/^(\s*version = \")[^\"]+(\";)/\${1}${ver}\${2}/; s|^(\s*hash = \")[^\"]+(\";)|\${1}${sri}\${2}|" flake.nix
     echo "Prepared: $zip"
     echo "SRI hash: $sri"
 
@@ -157,7 +158,7 @@ publish version:
     [[ -f "$zip" ]] || { echo "Missing $zip (run 'just release prepare $ver' first)" >&2; exit 1; }
     ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null || { echo "Tag ${tag} already exists" >&2; exit 1; }
 
-    git add Cargo.toml Cargo.lock crates/koma-app/macos/Info.plist
+    git add Cargo.toml Cargo.lock crates/koma-app/macos/Info.plist flake.nix
     git commit -m "chore: ${tag} をリリースする"
     git tag "$tag"
     git push origin main --tags
