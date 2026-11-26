@@ -15,6 +15,9 @@ default-members = [
     "crates/koma-ipc",
 ]
 
+[workspace.package]
+version = "0.1.0"
+
 [workspace.dependencies]
 # Keep every Makepad crate on the same reviewed fork commit.
 makepad-app-browser-host = { git = "https://github.com/tyPhoon-collab/makepad", rev = "2633054c3826aa9f4ba9aae31b5c12a8cac49a94" }

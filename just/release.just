@@ -3,9 +3,9 @@ set shell := ["zsh", "-cu"]
 _target_dir := env("CARGO_TARGET_DIR", "target")
 _dist_dir := _target_dir + "/release/dist"
 _app_dir := _dist_dir + "/Koma.app"
-_dmg_path := _dist_dir + "/Koma-arm64.dmg"
 _entitlements := "crates/koma-app/macos/entitlements.plist"
-_codesign_identity := env("CODESIGN_IDENTITY", "-")
+_codesign_identity := env("CODESIGN_IDENTITY", "Developer ID Application: nekonata, Inc. (F79C2UJ844)")
+_notary_profile := env("NOTARY_PROFILE", "koma-notary")
 
 # レシピ一覧を表示する
 default:
@@ -112,25 +112,53 @@ macos:
     sign_entitled "{{_app_dir}}"
     codesign --verify --deep --strict "{{_app_dir}}"
 
-# 配布用 DMG を作成する
+# バージョン更新・検査・ビルド・署名・公証・zip 化を行う
 [macos]
 [no-cd]
 [script("zsh", "-eu")]
-dmg: macos
-    stage="{{_dist_dir}}/dmg-stage"
-    rm -rf "$stage" "{{_dmg_path}}"
-    mkdir -p "$stage"
-    ditto "{{_app_dir}}" "$stage/Koma.app"
-    ln -s /Applications "$stage/Applications"
-    hdiutil create -volname "Koma" -srcfolder "$stage" -ov -format UDZO "{{_dmg_path}}"
-    rm -rf "$stage"
-    if [[ "{{_codesign_identity}}" != "-" ]]; then
-        codesign --force --timestamp --sign "{{_codesign_identity}}" "{{_dmg_path}}"
-    fi
+prepare version:
+    ver="{{version}}"
+    [[ "$ver" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]] || { echo "Invalid version: $ver (expected X.Y.Z)" >&2; exit 1; }
+    [[ -z "$(git status --porcelain)" ]] || { echo "Working tree is not clean" >&2; exit 1; }
+    [[ "{{_codesign_identity}}" != "-" ]] || { echo "Set Developer ID CODESIGN_IDENTITY before prepare" >&2; exit 1; }
 
-# 作成した DMG を Apple 公証へ提出してステープルする
+    perl -0777 -i -pe "s/(\[workspace\.package\]\nversion = \")[^\"]+(\")/\${1}${ver}\${2}/" Cargo.toml
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $ver" crates/koma-app/macos/Info.plist
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $ver" crates/koma-app/macos/Info.plist
+    cargo metadata --offline --format-version 1 >/dev/null
+
+    just check
+    just release macos
+
+    zip="{{_dist_dir}}/Koma-${ver}-arm64.zip"
+    rm -f "$zip"
+    ditto -c -k --sequesterRsrc --keepParent "{{_app_dir}}" "$zip"
+    xcrun notarytool submit "$zip" --keychain-profile "{{_notary_profile}}" --wait
+    xcrun stapler staple "{{_app_dir}}"
+    xcrun stapler validate "{{_app_dir}}"
+    spctl --assess --type execute --verbose=2 "{{_app_dir}}"
+    rm -f "$zip"
+    ditto -c -k --sequesterRsrc --keepParent "{{_app_dir}}" "$zip"
+
+    sri="sha256-$(openssl dgst -sha256 -binary "$zip" | openssl base64 -A)"
+    echo "Prepared: $zip"
+    echo "SRI hash: $sri"
+
+# prepare 済みのリリースをコミット・タグ付け・GitHub Releases へ公開する
 [macos]
 [no-cd]
-notarize profile:
-    xcrun notarytool submit "{{_dmg_path}}" --keychain-profile "{{profile}}" --wait
-    xcrun stapler staple "{{_dmg_path}}"
+[confirm("Publish prepared release to GitHub Releases?")]
+[script("zsh", "-eu")]
+publish version:
+    ver="{{version}}"
+    tag="v${ver}"
+    zip="{{_dist_dir}}/Koma-${ver}-arm64.zip"
+    [[ "$(git branch --show-current)" == "main" ]] || { echo "Must be on main branch" >&2; exit 1; }
+    [[ -f "$zip" ]] || { echo "Missing $zip (run 'just release prepare $ver' first)" >&2; exit 1; }
+    ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null || { echo "Tag ${tag} already exists" >&2; exit 1; }
+
+    git add Cargo.toml Cargo.lock crates/koma-app/macos/Info.plist
+    git commit -m "chore: ${tag} をリリースする"
+    git tag "$tag"
+    git push origin main --tags
+    gh release create "$tag" "$zip" --title "Koma ${tag}" --generate-notes
