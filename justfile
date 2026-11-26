@@ -1,11 +1,13 @@
 set shell := ["zsh", "-cu"]
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
+mod test 'just/test.just'
+
 _koma_packages := "-p koma-app -p koma-cli -p koma-core -p koma-ipc -p koma-browser-host -p koma-cef-fetch"
 
 # レシピ一覧を表示する
 default:
-    @just --list
+    @just --list --list-submodules
 
 # CEF ランタイムを取得・展開する
 cef-fetch:
@@ -21,11 +23,6 @@ setup: cef-fetch cef-host
 # ワークスペースをビルドする
 build:
     cargo build --workspace
-
-# ワークスペースのテストを実行する
-[positional-arguments]
-test *args:
-    cargo nextest run --workspace --offline "$@"
 
 # 起動する
 [macos]
