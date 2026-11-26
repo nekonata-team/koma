@@ -10,6 +10,7 @@ use koma_ipc::transport::{resolve_socket_path, send_request};
 use makepad_micro_serde::SerJson;
 
 mod args;
+mod web_screenshot;
 mod web_script;
 mod workspace;
 
@@ -97,6 +98,7 @@ fn run(args: Args) -> Result<(), String> {
     let script = args
         .web_script()
         .map(|(path, timeout)| (path.to_path_buf(), timeout));
+    let screenshot = args.web_screenshot().map(|p| p.map(Path::to_path_buf));
     let mut req = args.into_request();
     if is_remote {
         req.caller_koma_id = None;
@@ -109,6 +111,27 @@ fn run(args: Args) -> Result<(), String> {
             IpcPayload::WebScriptTarget(target) => web_script::run(&file, timeout, target),
             _ => Err("Expected a Web Koma script target from Koma".into()),
         };
+    }
+    if let Some(output) = screenshot {
+        let target = match resp.into_result()? {
+            IpcPayload::WebScriptTarget(target) => target,
+            _ => return Err("Expected a Web Koma target from Koma".into()),
+        };
+        let path = web_screenshot::capture(output.as_deref(), &target)?;
+        let path_str = path.display().to_string();
+        if json {
+            let payload = IpcPayload::WebScreenshot {
+                koma_id: target.koma_id,
+                path: path_str,
+            };
+            println!(
+                "{}",
+                koma_ipc::protocol::IpcResponse::Ok(payload).serialize_json()
+            );
+        } else {
+            println!("{path_str}");
+        }
+        return Ok(());
     }
 
     if json {
@@ -180,6 +203,7 @@ fn run(args: Args) -> Result<(), String> {
         IpcPayload::WebSnapshot(data) => println!("{}", data.snapshot.unwrap_or_default()),
         IpcPayload::WebScriptTarget(_) => return Err("Unexpected Web Koma script target".into()),
         IpcPayload::WebRead(data) => println!("{}", data.markdown.unwrap_or_default()),
+        IpcPayload::WebScreenshot { path, .. } => println!("{path}"),
         IpcPayload::Text { text, .. } => println!("{text}"),
         IpcPayload::DrawerList { items } => {
             for item in items {

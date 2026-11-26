@@ -94,8 +94,12 @@ fn js_string(s: &str) -> String {
 }
 
 /// Builds a semicolon-free IIFE wrapping `WebDOM.js` for `cef.evaluate_javascript`.
-pub fn build_koma_snapshot_expr() -> String {
-    format!("(() => {{\n{WEB_DOM_JS}\nreturn window.__komaWebDOM.komaSnapshot();\n}})()")
+pub fn build_koma_snapshot_expr(within: Option<&str>, full: bool) -> String {
+    let scope = within.map(js_string).unwrap_or_else(|| "null".into());
+    let interactive_only = if full { "false" } else { "true" };
+    format!(
+        "(() => {{\n{WEB_DOM_JS}\nreturn window.__komaWebDOM.komaSnapshot({scope}, undefined, {interactive_only});\n}})()"
+    )
 }
 
 pub fn build_koma_read_expr(within: Option<&str>) -> String {
@@ -123,6 +127,20 @@ pub fn build_koma_fill_expr(target: &str, text: &str) -> String {
     let v = js_string(text);
     format!(
         "(() => {{\nif (!window.__komaWebDOM) {{\n{WEB_DOM_JS}\n}}\ntry {{\n  const el = window.__komaWebDOM.komaResolveTarget({t});\n  if (!el) return {{ ok: false, error: 'Target not found: ' + {t} }};\n  el.focus();\n  window.__komaWebDOM.komaSetValue(el, {v});\n  window.__komaWebDOM.komaDispatchInput(el);\n  return {{ ok: true }};\n}} catch (e) {{\n  return {{ ok: false, error: String(e && e.message ? e.message : e) }};\n}}\n}})()"
+    )
+}
+
+pub fn build_koma_press_expr(key: &str) -> String {
+    let k = js_string(key);
+    format!(
+        "(() => {{\ntry {{\n  const parts = {k}.split('+').map(s => s.trim()).filter(Boolean);\n  if (!parts.length) return {{ ok: false, error: 'Key must not be empty' }};\n  const rawKey = parts.pop();\n  const mods = {{ ctrlKey: false, altKey: false, shiftKey: false, metaKey: false }};\n  for (const m of parts) {{\n    const low = m.toLowerCase();\n    if (low === 'ctrl' || low === 'control') mods.ctrlKey = true;\n    else if (low === 'alt' || low === 'opt' || low === 'option') mods.altKey = true;\n    else if (low === 'shift') mods.shiftKey = true;\n    else if (low === 'meta' || low === 'cmd' || low === 'super') mods.metaKey = true;\n    else return {{ ok: false, error: 'Unknown modifier: ' + m }};\n  }}\n  const keyMap = {{ enter: 'Enter', esc: 'Escape', escape: 'Escape', tab: 'Tab', space: ' ', backspace: 'Backspace', delete: 'Delete', home: 'Home', end: 'End', pageup: 'PageUp', pagedown: 'PageDown', arrowup: 'ArrowUp', arrowdown: 'ArrowDown', arrowleft: 'ArrowLeft', arrowright: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight' }};\n  const key = keyMap[rawKey.toLowerCase()] ?? rawKey;\n  const el = document.activeElement || document.body || document.documentElement;\n  if (!el) return {{ ok: false, error: 'No active element' }};\n  const init = {{ key, bubbles: true, cancelable: true, ...mods }};\n  const notCancelled = el.dispatchEvent(new KeyboardEvent('keydown', init));\n  if (notCancelled && key === 'Enter' && !mods.ctrlKey && !mods.altKey && !mods.metaKey) {{\n    if (el.tagName === 'INPUT' && el.form) {{\n      el.form.requestSubmit ? el.form.requestSubmit() : el.form.submit();\n    }} else if (el.tagName === 'A' || el.tagName === 'BUTTON' || el.getAttribute('role') === 'button') {{\n      el.click();\n    }}\n  }}\n  el.dispatchEvent(new KeyboardEvent('keyup', init));\n  return {{ ok: true }};\n}} catch (e) {{\n  return {{ ok: false, error: String(e && e.message ? e.message : e) }};\n}}\n}})()"
+    )
+}
+
+pub fn build_koma_scroll_expr(target: &str) -> String {
+    let t = js_string(target.trim());
+    format!(
+        "(() => {{\nif (!window.__komaWebDOM) {{\n{WEB_DOM_JS}\n}}\ntry {{\n  const raw = {t};\n  const low = raw.toLowerCase();\n  if (!raw || low === 'down') {{ window.scrollBy(0, Math.round(window.innerHeight * 0.8)); return {{ ok: true }}; }}\n  if (low === 'up') {{ window.scrollBy(0, -Math.round(window.innerHeight * 0.8)); return {{ ok: true }}; }}\n  if (low === 'top') {{ window.scrollTo(0, 0); return {{ ok: true }}; }}\n  if (low === 'bottom') {{ window.scrollTo(0, document.documentElement.scrollHeight); return {{ ok: true }}; }}\n  if (/^[+-]?\\d+$/.test(raw)) {{ window.scrollBy(0, Number(raw)); return {{ ok: true }}; }}\n  const el = window.__komaWebDOM.komaResolveTarget(raw);\n  if (!el) return {{ ok: false, error: 'Scroll target not found: ' + raw }};\n  el.scrollIntoView({{ block: 'center', inline: 'center' }});\n  return {{ ok: true }};\n}} catch (e) {{\n  return {{ ok: false, error: String(e && e.message ? e.message : e) }};\n}}\n}})()"
     )
 }
 
@@ -218,18 +236,23 @@ mod tests {
 
     #[test]
     fn snapshot_expr_has_no_trailing_semicolon() {
-        let expr = build_koma_snapshot_expr();
+        let expr = build_koma_snapshot_expr(None, false);
         let trimmed = expr.trim();
         assert!(!trimmed.ends_with(';'));
         assert!(trimmed.starts_with("(() => {"));
         assert!(trimmed.ends_with("})()"));
-        assert!(trimmed.contains("komaSnapshot()"));
+        assert!(trimmed.contains("komaSnapshot(null, undefined, true)"));
+
+        let scoped = build_koma_snapshot_expr(Some("main"), true);
+        assert!(scoped.contains("komaSnapshot(\"main\", undefined, false)"));
 
         for expr in [
             build_koma_read_expr(Some("@e1")),
             build_koma_text_expr(),
             build_koma_click_expr("#btn"),
             build_koma_fill_expr("input", "hello\nworld"),
+            build_koma_press_expr("Enter"),
+            build_koma_scroll_expr("down"),
             build_koma_api_inject_expr(),
             build_web_navigation_inject_expr(),
         ] {

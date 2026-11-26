@@ -141,6 +141,13 @@ impl Default for WorkspaceState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct InsertKomaOptions {
+    pub target: Option<(usize, usize)>,
+    pub width: Option<f64>,
+    pub focus: Option<bool>,
+}
+
 impl WorkspaceState {
     /// Clean initial state with one empty Sheet.
     pub fn new() -> Self {
@@ -513,33 +520,72 @@ impl WorkspaceState {
         command: Option<String>,
         caller: Option<&KomaId>,
     ) -> (KomaMeta, bool) {
-        let id = self.allocate_koma_id();
-        let profile_id = self.profile_id.clone();
-        let caller_pos = caller.and_then(|cid| {
-            self.sheets.iter().enumerate().find_map(|(s_idx, sheet)| {
-                sheet
-                    .komas
-                    .iter()
-                    .position(|k| &k.id == cid)
-                    .map(|k_idx| (s_idx, k_idx, cid))
-            })
-        });
-        let (sheet_idx, insert_idx, should_focus) = match caller_pos {
-            Some((s_idx, k_idx, cid)) => {
-                let is_active_focused = s_idx == self.active_sheet
-                    && self.sheets[s_idx].focused_koma_id.as_ref() == Some(cid);
-                (s_idx, k_idx + 1, is_active_focused)
+        self.insert_koma_with_options(
+            kind,
+            label,
+            initial_url,
+            cwd,
+            command,
+            caller,
+            InsertKomaOptions::default(),
+        )
+        .expect("default InsertKomaOptions is always valid")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_koma_with_options(
+        &mut self,
+        kind: KomaKind,
+        label: String,
+        initial_url: Option<String>,
+        cwd: Option<String>,
+        command: Option<String>,
+        caller: Option<&KomaId>,
+        opts: InsertKomaOptions,
+    ) -> Result<(KomaMeta, bool), String> {
+        let width = match opts.width {
+            Some(w) if !w.is_finite() || w <= 0.0 => {
+                return Err("Koma width must be finite and positive".into());
             }
-            None => {
-                let sheet = &self.sheets[self.active_sheet];
-                let idx = sheet
-                    .focused_index()
-                    .map(|i| (i + 1).min(sheet.komas.len()))
-                    .unwrap_or(0);
-                (self.active_sheet, idx, true)
+            Some(w) => w.clamp(MIN_KOMA_WIDTH, MAX_KOMA_WIDTH),
+            None => DEFAULT_KOMA_WIDTH,
+        };
+        let (sheet_idx, insert_idx, should_focus) = if let Some((s_idx, k_idx)) = opts.target {
+            if s_idx >= self.sheets.len() {
+                return Err("Target sheet out of range".into());
+            }
+            let clamped = k_idx.min(self.sheets[s_idx].komas.len());
+            (s_idx, clamped, opts.focus.unwrap_or(false))
+        } else {
+            let caller_pos = caller.and_then(|cid| {
+                self.sheets.iter().enumerate().find_map(|(s_idx, sheet)| {
+                    sheet
+                        .komas
+                        .iter()
+                        .position(|k| &k.id == cid)
+                        .map(|k_idx| (s_idx, k_idx, cid))
+                })
+            });
+            match caller_pos {
+                Some((s_idx, k_idx, cid)) => {
+                    let is_active_focused = s_idx == self.active_sheet
+                        && self.sheets[s_idx].focused_koma_id.as_ref() == Some(cid);
+                    (s_idx, k_idx + 1, opts.focus.unwrap_or(is_active_focused))
+                }
+                None => {
+                    let sheet = &self.sheets[self.active_sheet];
+                    let idx = sheet
+                        .focused_index()
+                        .map(|i| (i + 1).min(sheet.komas.len()))
+                        .unwrap_or(0);
+                    (self.active_sheet, idx, opts.focus.unwrap_or(true))
+                }
             }
         };
+        let id = self.allocate_koma_id();
+        let profile_id = self.profile_id.clone();
         let sheet = &mut self.sheets[sheet_idx];
+        let was_empty = sheet.komas.is_empty();
         let koma = KomaMeta {
             id: id.clone(),
             sheet_id: Some(sheet.id.clone()),
@@ -549,16 +595,19 @@ impl WorkspaceState {
             initial_url,
             cwd,
             command,
-            width: DEFAULT_KOMA_WIDTH,
+            width,
             ratio: None,
             restore: None,
             koma_api_enabled: false,
         };
         sheet.komas.insert(insert_idx, koma.clone());
-        if should_focus {
+        if should_focus || was_empty {
             sheet.focused_koma_id = Some(id);
         }
-        (koma, should_focus)
+        if should_focus {
+            self.active_sheet = sheet_idx;
+        }
+        Ok((koma, should_focus))
     }
 
     pub fn duplicate_focused_koma(
@@ -726,6 +775,35 @@ impl WorkspaceState {
         let removed = self.sheets.remove(self.active_sheet);
         self.active_sheet = self.active_sheet.min(self.sheets.len() - 1);
         Ok(removed)
+    }
+
+    pub fn remove_sheet_by_id(
+        &mut self,
+        sheet_id: &SheetId,
+        force: bool,
+    ) -> Result<(SheetState, bool), String> {
+        if self.sheets.len() <= 1 {
+            return Err("Cannot close the last sheet".into());
+        }
+        let idx = self
+            .sheets
+            .iter()
+            .position(|s| &s.id == sheet_id)
+            .ok_or_else(|| format!("Sheet not found: {sheet_id}"))?;
+        if !force && !self.sheets[idx].komas.is_empty() {
+            let count = self.sheets[idx].komas.len();
+            return Err(format!(
+                "Sheet {sheet_id} has {count} open Koma(s); pass --force to close"
+            ));
+        }
+        let removed = self.sheets.remove(idx);
+        let was_active = idx == self.active_sheet;
+        if idx < self.active_sheet {
+            self.active_sheet -= 1;
+        } else if was_active {
+            self.active_sheet = idx.saturating_sub(1).min(self.sheets.len() - 1);
+        }
+        Ok((removed, was_active))
     }
 
     pub fn update_koma_url(
@@ -1250,5 +1328,41 @@ mod tests {
         );
         assert!(focused_active);
         assert_eq!(state.focused_koma().map(|k| &k.id), Some(&focused_new.id));
+    }
+
+    #[test]
+    fn insert_koma_with_options_and_remove_sheet_by_id() {
+        let mut state = WorkspaceState::new();
+        let sheet1_id = state.current_sheet().id.clone();
+        let sheet2_id = state.add_named_sheet("Work", false).unwrap().id.clone();
+
+        // Explicit target with focus=false keeps active sheet and applies width.
+        let (placed, focused) = state
+            .insert_koma_with_options(
+                KomaKind::Web,
+                "Docs".into(),
+                Some("https://example.com".into()),
+                None,
+                None,
+                None,
+                InsertKomaOptions {
+                    target: Some((1, 0)),
+                    width: Some(880.0),
+                    focus: Some(false),
+                },
+            )
+            .unwrap();
+        assert!(!focused);
+        assert_eq!(state.active_sheet_index(), 0);
+        assert_eq!(placed.width, 880.0);
+        assert_eq!(state.sheets[1].komas[0].id, placed.id);
+
+        // Removing a non-empty sheet by ID requires force.
+        assert!(state.remove_sheet_by_id(&sheet2_id, false).is_err());
+        let (removed, was_active) = state.remove_sheet_by_id(&sheet2_id, true).unwrap();
+        assert_eq!(removed.id, sheet2_id);
+        assert!(!was_active);
+        assert_eq!(state.active_sheet_index(), 0);
+        assert!(state.remove_sheet_by_id(&sheet1_id, true).is_err());
     }
 }

@@ -18,9 +18,9 @@ mod devtools;
 mod js_bridge;
 
 pub use js_bridge::{
-    build_koma_api_inject_expr, build_koma_click_expr, build_koma_fill_expr, build_koma_read_expr,
-    build_koma_snapshot_expr, build_koma_text_expr, build_web_navigation_inject_expr, KomaApiEvent,
-    WebNavEvent,
+    build_koma_api_inject_expr, build_koma_click_expr, build_koma_fill_expr, build_koma_press_expr,
+    build_koma_read_expr, build_koma_scroll_expr, build_koma_snapshot_expr, build_koma_text_expr,
+    build_web_navigation_inject_expr, KomaApiEvent, WebNavEvent,
 };
 use js_bridge::{
     parse_action_response, parse_koma_api_event, parse_read_response, parse_snapshot_response,
@@ -255,6 +255,7 @@ impl WebViewRuntime {
         }
         Some(match state.devtools_target.as_ref()? {
             Ok(target_id) => IpcResponse::Ok(IpcPayload::WebScriptTarget(WebScriptTargetData {
+                koma_id: koma_id.to_string(),
                 port: self.views.devtools_port()?,
                 target_id: target_id.clone(),
             })),
@@ -602,9 +603,11 @@ impl WebViewRuntime {
         &mut self,
         cx: &mut Cx,
         koma_id: &KomaId,
+        within: Option<&str>,
+        full: bool,
         reply: mpsc::SyncSender<IpcResponse>,
     ) {
-        let expr = build_koma_snapshot_expr();
+        let expr = build_koma_snapshot_expr(within, full);
         self.start_ipc_eval(
             cx,
             koma_id,
@@ -685,6 +688,46 @@ impl WebViewRuntime {
         reply: mpsc::SyncSender<IpcResponse>,
     ) {
         let expr = build_koma_fill_expr(target, text);
+        self.start_ipc_eval(
+            cx,
+            koma_id,
+            &expr,
+            |b, r| PendingEval::Action {
+                koma_id: b,
+                reply: r,
+            },
+            reply,
+        );
+    }
+
+    pub fn press_for_ipc(
+        &mut self,
+        cx: &mut Cx,
+        koma_id: &KomaId,
+        key: &str,
+        reply: mpsc::SyncSender<IpcResponse>,
+    ) {
+        let expr = build_koma_press_expr(key);
+        self.start_ipc_eval(
+            cx,
+            koma_id,
+            &expr,
+            |b, r| PendingEval::Action {
+                koma_id: b,
+                reply: r,
+            },
+            reply,
+        );
+    }
+
+    pub fn scroll_for_ipc(
+        &mut self,
+        cx: &mut Cx,
+        koma_id: &KomaId,
+        target: &str,
+        reply: mpsc::SyncSender<IpcResponse>,
+    ) {
+        let expr = build_koma_scroll_expr(target);
         self.start_ipc_eval(
             cx,
             koma_id,

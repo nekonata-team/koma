@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use koma_ipc::protocol::{
     DrawerCommand, DrawerKeepArgs, IpcCommand, IpcRequest, KomaCommand, KomaListArgs,
-    KomaPlacement, KomaTarget, KomaTextArgs, NotificationCommand, NotificationSendArgs,
-    SheetCommand, TerminalCommand, TerminalNewArgs, TerminalTextArgs, WebClickArgs, WebCommand,
-    WebEvalArgs, WebFillArgs, WebReadArgs, WebReloadArgs, WorkspaceCommand,
+    KomaPlacement, KomaTarget, KomaTextArgs, NotificationCommand, NotificationListArgs,
+    NotificationSendArgs, SheetCloseArgs, SheetCommand, TerminalCommand, TerminalNewArgs,
+    TerminalTextArgs, WebClickArgs, WebCommand, WebEvalArgs, WebFillArgs, WebNavigateArgs,
+    WebNewArgs, WebReadArgs, WebReloadArgs, WebSnapshotArgs, WorkspaceCommand,
 };
 
 fn parse_non_empty(raw: &str) -> Result<String, String> {
@@ -34,6 +35,32 @@ struct OptionalKoma {
     /// Target a specific Koma.
     #[arg(long, value_name = "ID", allow_hyphen_values = true)]
     koma: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+struct CreatePlacement {
+    #[arg(long, value_name = "KOMA_ID", group = "create_placement")]
+    left_of: Option<String>,
+    #[arg(long, value_name = "KOMA_ID", group = "create_placement")]
+    right_of: Option<String>,
+    #[arg(long, value_name = "SHEET_ID", group = "create_placement")]
+    end_of: Option<String>,
+    /// Set initial width in points.
+    #[arg(long)]
+    width: Option<f64>,
+    /// Focus the created Koma, switching Sheets if needed.
+    #[arg(long)]
+    focus: bool,
+}
+
+impl CreatePlacement {
+    fn placement(&self) -> Option<KomaPlacement> {
+        self.left_of
+            .clone()
+            .map(KomaPlacement::LeftOf)
+            .or_else(|| self.right_of.clone().map(KomaPlacement::RightOf))
+            .or_else(|| self.end_of.clone().map(KomaPlacement::EndOf))
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -168,7 +195,15 @@ enum Sheet {
     Focus {
         number: usize,
     },
-    Close,
+    /// Close the current Sheet, or a specific Sheet by ID.
+    Close {
+        /// Target a specific Sheet ID.
+        #[arg(long, value_name = "ID", allow_hyphen_values = true)]
+        sheet: Option<String>,
+        /// Close even if the target Sheet contains open Komas.
+        #[arg(long)]
+        force: bool,
+    },
     /// List all Sheets in the Workspace.
     List,
     /// Create an empty Sheet.
@@ -193,6 +228,24 @@ enum Web {
         /// Enable KomaAPI for the Web Koma.
         #[arg(long)]
         koma_api: bool,
+        #[command(flatten)]
+        placement: CreatePlacement,
+    },
+    /// Navigate an existing Web Koma to a URL or search query.
+    Navigate {
+        #[command(flatten)]
+        target: OptionalKoma,
+        url: String,
+    },
+    /// Navigate back in browsing history.
+    Back {
+        #[command(flatten)]
+        target: OptionalKoma,
+    },
+    /// Navigate forward in browsing history.
+    Forward {
+        #[command(flatten)]
+        target: OptionalKoma,
     },
     Url {
         #[command(flatten)]
@@ -224,9 +277,22 @@ enum Web {
         #[arg(long, default_value = "30", value_name = "SECONDS")]
         timeout: NonZeroU64,
     },
+    /// Save a PNG screenshot of a Web Koma.
+    Screenshot {
+        #[command(flatten)]
+        target: OptionalKoma,
+        /// Destination file path (defaults to a temporary PNG file).
+        path: Option<PathBuf>,
+    },
     Snapshot {
         #[command(flatten)]
         target: OptionalKoma,
+        /// Limit snapshot to a selector or element reference.
+        #[arg(long, allow_hyphen_values = true)]
+        within: Option<String>,
+        /// Include non-interactive visible semantic elements.
+        #[arg(long)]
+        full: bool,
     },
     Read {
         #[command(flatten)]
@@ -255,6 +321,19 @@ enum Web {
         target: OptionalKoma,
         text: String,
     },
+    /// Dispatch a key press such as Enter, Escape, Tab, or Ctrl+A.
+    Press {
+        #[command(flatten)]
+        target: OptionalKoma,
+        key: String,
+    },
+    /// Scroll the page (down, up, top, bottom, pixel offset) or an element into view.
+    Scroll {
+        #[command(flatten)]
+        target: OptionalKoma,
+        #[arg(default_value = "down", allow_hyphen_values = true)]
+        direction_or_target: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -264,6 +343,8 @@ enum Terminal {
         /// Run an initial command in the new interactive shell.
         #[arg(long)]
         run: Option<String>,
+        #[command(flatten)]
+        placement: CreatePlacement,
     },
     Text {
         #[command(flatten)]
@@ -338,6 +419,11 @@ enum Notification {
         /// List only unread Notifications.
         #[arg(long)]
         unread: bool,
+        #[command(flatten)]
+        target: OptionalKoma,
+        /// Limit the number of Notifications returned.
+        #[arg(long)]
+        limit: Option<NonZeroUsize>,
     },
     Read {
         id: String,
@@ -366,7 +452,21 @@ impl Args {
                     "one of --left-of, --right-of, or --end-of is required",
                 ));
             }
-            Command::Resize { width, .. } if !width.is_finite() || *width <= 0.0 => {
+            Command::Resize { width, .. }
+            | Command::Web(Web::New {
+                placement:
+                    CreatePlacement {
+                        width: Some(width), ..
+                    },
+                ..
+            })
+            | Command::Terminal(Terminal::New {
+                placement:
+                    CreatePlacement {
+                        width: Some(width), ..
+                    },
+                ..
+            }) if !width.is_finite() || *width <= 0.0 => {
                 return Err(Self::command().error(
                     ErrorKind::ValueValidation,
                     "--width must be finite and positive",
@@ -410,7 +510,12 @@ impl Args {
             Command::Sheet(Sheet::Focus { number }) => IpcCommand::Sheet(SheetCommand::Focus {
                 sheet_index: number,
             }),
-            Command::Sheet(Sheet::Close) => IpcCommand::Sheet(SheetCommand::Close),
+            Command::Sheet(Sheet::Close { sheet, force }) => {
+                IpcCommand::Sheet(SheetCommand::Close(SheetCloseArgs {
+                    sheet_id: sheet,
+                    force,
+                }))
+            }
             Command::Sheet(Sheet::List) => IpcCommand::Sheet(SheetCommand::List),
             Command::Sheet(Sheet::New { label, focus }) => {
                 IpcCommand::Sheet(SheetCommand::New { label, focus })
@@ -452,8 +557,30 @@ impl Args {
             Command::Close { target } => IpcCommand::Koma(KomaCommand::Close {
                 koma_id: target.koma,
             }),
-            Command::Web(Web::New { url, koma_api }) => {
-                IpcCommand::Web(WebCommand::New { url, koma_api })
+            Command::Web(Web::New {
+                url,
+                koma_api,
+                placement,
+            }) => IpcCommand::Web(WebCommand::New(WebNewArgs {
+                url,
+                koma_api,
+                placement: placement.placement(),
+                width: placement.width,
+                focus: placement.focus,
+            })),
+            Command::Web(Web::Navigate { target, url }) => {
+                IpcCommand::Web(WebCommand::Navigate(WebNavigateArgs {
+                    koma_id: target.koma,
+                    url,
+                }))
+            }
+            Command::Web(Web::Back { target }) => IpcCommand::Web(WebCommand::Back(KomaTarget {
+                koma_id: target.koma,
+            })),
+            Command::Web(Web::Forward { target }) => {
+                IpcCommand::Web(WebCommand::Forward(KomaTarget {
+                    koma_id: target.koma,
+                }))
             }
             Command::Web(Web::Url { target }) => IpcCommand::Web(WebCommand::Url(KomaTarget {
                 koma_id: target.koma,
@@ -480,16 +607,21 @@ impl Args {
                     script: expr,
                 }))
             }
-            Command::Web(Web::Script { target, .. }) => {
+            Command::Web(Web::Script { target, .. })
+            | Command::Web(Web::Screenshot { target, .. }) => {
                 IpcCommand::Web(WebCommand::ScriptTarget(KomaTarget {
                     koma_id: target.koma,
                 }))
             }
-            Command::Web(Web::Snapshot { target }) => {
-                IpcCommand::Web(WebCommand::Snapshot(KomaTarget {
-                    koma_id: target.koma,
-                }))
-            }
+            Command::Web(Web::Snapshot {
+                target,
+                within,
+                full,
+            }) => IpcCommand::Web(WebCommand::Snapshot(WebSnapshotArgs {
+                koma_id: target.koma,
+                within,
+                full,
+            })),
             Command::Web(Web::Read { target, within }) => {
                 IpcCommand::Web(WebCommand::Read(WebReadArgs {
                     koma_id: target.koma,
@@ -518,9 +650,30 @@ impl Args {
                     text,
                 }))
             }
-            Command::Terminal(Terminal::New { cwd, run }) => {
-                IpcCommand::Terminal(TerminalCommand::New(TerminalNewArgs { cwd, run }))
+            Command::Web(Web::Press { target, key }) => {
+                IpcCommand::Web(WebCommand::Press(KomaTextArgs {
+                    koma_id: target.koma,
+                    text: key,
+                }))
             }
+            Command::Web(Web::Scroll {
+                target,
+                direction_or_target,
+            }) => IpcCommand::Web(WebCommand::Scroll(KomaTextArgs {
+                koma_id: target.koma,
+                text: direction_or_target,
+            })),
+            Command::Terminal(Terminal::New {
+                cwd,
+                run,
+                placement,
+            }) => IpcCommand::Terminal(TerminalCommand::New(TerminalNewArgs {
+                cwd,
+                run,
+                placement: placement.placement(),
+                width: placement.width,
+                focus: placement.focus,
+            })),
             Command::Terminal(Terminal::Text { target, lines }) => {
                 IpcCommand::Terminal(TerminalCommand::Text(TerminalTextArgs {
                     koma_id: target.koma,
@@ -581,11 +734,15 @@ impl Args {
                 title,
                 body,
             })),
-            Command::Notification(Notification::List { unread }) => {
-                IpcCommand::Notification(NotificationCommand::List {
-                    unread_only: unread,
-                })
-            }
+            Command::Notification(Notification::List {
+                unread,
+                target,
+                limit,
+            }) => IpcCommand::Notification(NotificationCommand::List(NotificationListArgs {
+                unread_only: unread,
+                koma_id: target.koma,
+                limit: limit.map(NonZeroUsize::get),
+            })),
             Command::Notification(Notification::Read { id }) => {
                 IpcCommand::Notification(NotificationCommand::Read { id })
             }
@@ -613,6 +770,13 @@ impl Args {
             return None;
         };
         Some((file, *timeout))
+    }
+
+    pub(super) fn web_screenshot(&self) -> Option<Option<&Path>> {
+        let Command::Web(Web::Screenshot { path, .. }) = &self.command else {
+            return None;
+        };
+        Some(path.as_deref())
     }
 }
 
@@ -649,7 +813,110 @@ mod tests {
                 &["overview", "toggle"],
                 IpcCommand::Sheet(SheetCommand::OverviewToggle),
             ),
-            (&["sheet", "close"], IpcCommand::Sheet(SheetCommand::Close)),
+            (
+                &["sheet", "close"],
+                IpcCommand::Sheet(SheetCommand::Close(SheetCloseArgs::default())),
+            ),
+            (
+                &["sheet", "close", "--sheet", "s2", "--force"],
+                IpcCommand::Sheet(SheetCommand::Close(SheetCloseArgs {
+                    sheet_id: Some("s2".into()),
+                    force: true,
+                })),
+            ),
+            (
+                &["web", "navigate", "https://example.com", "--koma", "k1"],
+                IpcCommand::Web(WebCommand::Navigate(WebNavigateArgs {
+                    koma_id: Some("k1".into()),
+                    url: "https://example.com".into(),
+                })),
+            ),
+            (
+                &["web", "back", "--koma", "k1"],
+                IpcCommand::Web(WebCommand::Back(KomaTarget {
+                    koma_id: Some("k1".into()),
+                })),
+            ),
+            (
+                &["web", "forward"],
+                IpcCommand::Web(WebCommand::Forward(KomaTarget { koma_id: None })),
+            ),
+            (
+                &["web", "press", "Enter", "--koma", "k1"],
+                IpcCommand::Web(WebCommand::Press(KomaTextArgs {
+                    koma_id: Some("k1".into()),
+                    text: "Enter".into(),
+                })),
+            ),
+            (
+                &["web", "scroll", "-200"],
+                IpcCommand::Web(WebCommand::Scroll(KomaTextArgs {
+                    koma_id: None,
+                    text: "-200".into(),
+                })),
+            ),
+            (
+                &["web", "snapshot", "--within", "main", "--full"],
+                IpcCommand::Web(WebCommand::Snapshot(WebSnapshotArgs {
+                    koma_id: None,
+                    within: Some("main".into()),
+                    full: true,
+                })),
+            ),
+            (
+                &[
+                    "web",
+                    "new",
+                    "https://example.com",
+                    "--end-of",
+                    "s2",
+                    "--width",
+                    "900",
+                    "--focus",
+                ],
+                IpcCommand::Web(WebCommand::New(WebNewArgs {
+                    url: "https://example.com".into(),
+                    koma_api: false,
+                    placement: Some(KomaPlacement::EndOf("s2".into())),
+                    width: Some(900.0),
+                    focus: true,
+                })),
+            ),
+            (
+                &[
+                    "terminal",
+                    "new",
+                    ".",
+                    "--left-of",
+                    "k1",
+                    "--width",
+                    "720",
+                    "--focus",
+                ],
+                IpcCommand::Terminal(TerminalCommand::New(TerminalNewArgs {
+                    cwd: Some(".".into()),
+                    run: None,
+                    placement: Some(KomaPlacement::LeftOf("k1".into())),
+                    width: Some(720.0),
+                    focus: true,
+                })),
+            ),
+            (
+                &[
+                    "notification",
+                    "list",
+                    "--unread",
+                    "--koma",
+                    "k1",
+                    "--limit",
+                    "5",
+                ],
+                IpcCommand::Notification(NotificationCommand::List(NotificationListArgs {
+                    unread_only: true,
+                    koma_id: Some("k1".into()),
+                    limit: Some(5),
+                })),
+            ),
             (
                 &["preset", "list"],
                 IpcCommand::Sheet(SheetCommand::PresetList),
@@ -690,6 +957,18 @@ mod tests {
             }))
         );
         assert!(parse(&["web", "script", "--timeout", "0", "test.mjs"]).is_err());
+
+        let shot = parse(&["web", "screenshot", "--koma", "koma-2", "/tmp/out.png"]).unwrap();
+        assert_eq!(shot.web_screenshot(), Some(Some(Path::new("/tmp/out.png"))));
+        assert_eq!(
+            shot.into_request().command,
+            IpcCommand::Web(WebCommand::ScriptTarget(KomaTarget {
+                koma_id: Some("koma-2".into())
+            }))
+        );
+        assert!(parse(&["web", "new", "https://example.com", "--width", "0"]).is_err());
+        assert!(parse(&["terminal", "new", "--left-of", "k1", "--end-of", "s1"]).is_err());
+        assert!(parse(&["notification", "list", "--limit", "0"]).is_err());
     }
 
     #[test]

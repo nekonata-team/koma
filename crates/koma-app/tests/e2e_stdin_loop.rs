@@ -418,6 +418,7 @@ fn headless_stdin_loop_handles_keys_and_ipc() {
         TerminalNewArgs {
             cwd: None,
             run: Some("printf '%s-%s\\n' FIRST CHECK".into()),
+            ..Default::default()
         },
     )))
     .unwrap() else {
@@ -759,10 +760,12 @@ fn verify_web_zoom(
     let html = tmp.join("zoom.html");
     std::fs::write(&html, "<!doctype html><title>Zoom test</title>").unwrap();
     let new_page = || {
-        let IpcPayload::WebKoma(web) = ipc(IpcCommand::Web(WebCommand::New {
-            url: html.display().to_string(),
-            koma_api: false,
-        }))
+        let IpcPayload::WebKoma(web) = ipc(IpcCommand::Web(WebCommand::New(
+            koma_ipc::protocol::WebNewArgs {
+                url: html.display().to_string(),
+                ..Default::default()
+            },
+        )))
         .unwrap() else {
             panic!("expected Web Koma ID")
         };

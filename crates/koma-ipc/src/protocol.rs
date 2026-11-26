@@ -25,6 +25,28 @@ pub struct KomaTarget {
     pub koma_id: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, SerJson, DeJson)]
+pub struct WebNewArgs {
+    pub url: String,
+    pub koma_api: bool,
+    pub placement: Option<KomaPlacement>,
+    pub width: Option<f64>,
+    pub focus: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
+pub struct WebNavigateArgs {
+    pub koma_id: Option<String>,
+    pub url: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, SerJson, DeJson)]
+pub struct WebSnapshotArgs {
+    pub koma_id: Option<String>,
+    pub within: Option<String>,
+    pub full: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
 pub struct WebReloadArgs {
     pub koma_id: Option<String>,
@@ -66,6 +88,22 @@ pub struct KomaTextArgs {
 pub struct TerminalNewArgs {
     pub cwd: Option<String>,
     pub run: Option<String>,
+    pub placement: Option<KomaPlacement>,
+    pub width: Option<f64>,
+    pub focus: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, SerJson, DeJson)]
+pub struct SheetCloseArgs {
+    pub sheet_id: Option<String>,
+    pub force: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, SerJson, DeJson)]
+pub struct NotificationListArgs {
+    pub unread_only: bool,
+    pub koma_id: Option<String>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, SerJson, DeJson)]
@@ -139,7 +177,7 @@ pub enum KomaCommand {
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
 pub enum SheetCommand {
     Focus { sheet_index: usize },
-    Close,
+    Close(SheetCloseArgs),
     List,
     New { label: String, focus: bool },
     PresetList,
@@ -151,18 +189,23 @@ pub enum SheetCommand {
 
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
 pub enum WebCommand {
-    New { url: String, koma_api: bool },
+    New(WebNewArgs),
+    Navigate(WebNavigateArgs),
+    Back(KomaTarget),
+    Forward(KomaTarget),
     Url(KomaTarget),
     Devtools,
     Reload(WebReloadArgs),
     Eval(WebEvalArgs),
     ScriptTarget(KomaTarget),
-    Snapshot(KomaTarget),
+    Snapshot(WebSnapshotArgs),
     Read(WebReadArgs),
     Text(KomaTarget),
     Click(WebClickArgs),
     Fill(WebFillArgs),
     Type(KomaTextArgs),
+    Press(KomaTextArgs),
+    Scroll(KomaTextArgs),
     BenchSpawnWebs { count: usize },
 }
 
@@ -188,7 +231,7 @@ pub enum DrawerCommand {
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
 pub enum NotificationCommand {
     Send(NotificationSendArgs),
-    List { unread_only: bool },
+    List(NotificationListArgs),
     Read { id: String },
     Unread { id: String },
 }
@@ -282,6 +325,7 @@ pub struct WebSnapshotData {
 
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
 pub struct WebScriptTargetData {
+    pub koma_id: String,
     pub port: u16,
     pub target_id: String,
 }
@@ -348,6 +392,10 @@ pub enum IpcPayload {
     WebSnapshot(WebSnapshotData),
     WebScriptTarget(WebScriptTargetData),
     WebRead(WebReadData),
+    WebScreenshot {
+        koma_id: String,
+        path: String,
+    },
     Text {
         koma_id: String,
         text: String,
@@ -416,6 +464,29 @@ mod tests {
                 title: None,
                 koma_api: false,
             }))),
+            IpcRequest::new(IpcCommand::Web(WebCommand::New(WebNewArgs {
+                url: "https://example.com".into(),
+                koma_api: false,
+                placement: Some(KomaPlacement::EndOf("s2".into())),
+                width: Some(800.0),
+                focus: true,
+            }))),
+            IpcRequest::new(IpcCommand::Web(WebCommand::Snapshot(WebSnapshotArgs {
+                koma_id: None,
+                within: Some("main".into()),
+                full: true,
+            }))),
+            IpcRequest::new(IpcCommand::Sheet(SheetCommand::Close(SheetCloseArgs {
+                sheet_id: Some("s2".into()),
+                force: true,
+            }))),
+            IpcRequest::new(IpcCommand::Notification(NotificationCommand::List(
+                NotificationListArgs {
+                    unread_only: true,
+                    koma_id: Some("k1".into()),
+                    limit: Some(10),
+                },
+            ))),
         ];
         for req in requests {
             let json = req.serialize_json();

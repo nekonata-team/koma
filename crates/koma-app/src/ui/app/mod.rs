@@ -11,7 +11,9 @@ use koma_app::domain::router::OverlayKind;
 use koma_app::domain::sheet_presets::available_sheet_presets;
 use koma_app::persistence;
 use koma_core::input::{derive_url_label, KomaInput};
-use koma_core::model::{InputMode, KomaId, KomaKind, KomaMeta, SheetId, WorkspaceState};
+use koma_core::model::{
+    InputMode, InsertKomaOptions, KomaId, KomaKind, KomaMeta, SheetId, SheetState, WorkspaceState,
+};
 use makepad_widgets::*;
 
 use crate::runtime::ipc_server::IpcServer;
@@ -596,6 +598,18 @@ impl App {
         recent: Option<&str>,
         caller: Option<&KomaId>,
     ) -> KomaMeta {
+        self.create_koma_with_options(cx, input, recent, caller, InsertKomaOptions::default())
+            .expect("default InsertKomaOptions is always valid")
+    }
+
+    pub(super) fn create_koma_with_options(
+        &mut self,
+        cx: &mut Cx,
+        input: KomaInput,
+        recent: Option<&str>,
+        caller: Option<&KomaId>,
+        opts: InsertKomaOptions,
+    ) -> Result<KomaMeta, String> {
         let (kind, label, url, cwd, command) = match input {
             KomaInput::Terminal { cwd, command } => {
                 let label = if cwd.is_some() {
@@ -614,7 +628,7 @@ impl App {
         };
         let (koma, focused_active) = self
             .state
-            .insert_koma_after(kind, label, url, cwd, command, caller);
+            .insert_koma_with_options(kind, label, url, cwd, command, caller, opts)?;
         if focused_active {
             self.state.mode = InputMode::ContentInput;
         }
@@ -625,7 +639,7 @@ impl App {
         if !focused_active {
             self.show_created_koma_toast(cx, &koma);
         }
-        koma
+        Ok(koma)
     }
 
     pub(super) fn spawn_private_workspace(&mut self, cx: &mut Cx) -> Result<(), String> {
@@ -674,6 +688,22 @@ impl App {
         });
         self.sync_after_mutation(cx, true);
         Ok(())
+    }
+
+    pub(super) fn close_sheet_by_id(
+        &mut self,
+        cx: &mut Cx,
+        sheet_id: &SheetId,
+        force: bool,
+    ) -> Result<SheetState, String> {
+        let (removed, was_active) = self.state.remove_sheet_by_id(sheet_id, force)?;
+        self.with_strip_mut(cx, |strip, cx| {
+            for koma in &removed.komas {
+                strip.remove_koma(cx, &koma.id, koma.kind);
+            }
+        });
+        self.sync_after_mutation(cx, was_active);
+        Ok(removed)
     }
 
     pub(super) fn apply_sheet_preset_by_name(
