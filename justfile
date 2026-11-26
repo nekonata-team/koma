@@ -2,6 +2,7 @@ set shell := ["zsh", "-cu"]
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
 mod makepad 'just/makepad.just'
+mod release 'just/release.just'
 mod test 'just/test.just'
 
 _koma_packages := "-p koma-app -p koma-cli -p koma-core -p koma-ipc -p koma-browser-host -p koma-cef-fetch"
