@@ -72,6 +72,10 @@ koma *args:
 fmt *args:
     cargo fmt {{_koma_packages}} "$@"
 
+# Koma のコード整形を検査する
+fmt-check:
+    cargo fmt {{_koma_packages}} -- --check
+
 # Koma の clippy を実行する
 [positional-arguments]
 clippy *args:
@@ -87,7 +91,7 @@ deny:
     cargo deny --locked --all-features check sources
 
 # Koma の整形、lint、依存境界を検査する
-check:
-    just fmt -- --check
-    just clippy
-    just deny
+check: fmt-check clippy deny
+
+# 検査とテストを一括実行する
+ci: check test::default
