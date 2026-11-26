@@ -43,6 +43,24 @@ Makepad 側の独自変更は、同時に更新が必要なクレートを1コ�
 push 前に手元の Makepad チェックアウトで動作確認する場合は、`MAKEPAD_DIR=/path/to/makepad just makepad check` のように実行します。
 実行時は `Cargo.lock` が一時変更されるため、確認後に `git checkout -- Cargo.lock` で戻します。
 
+## macOS 向けのリリース手順
+
+初回のみ、Apple の公証用プロファイル（既定名 `koma-notary`）をキーチェーンへ登録します。
+Apple ID と [Apple Account](https://account.apple.com/) で発行した App 用パスワードを使うか、App Store Connect API キー（`.p8`）を登録します。
+
+```sh
+xcrun notarytool store-credentials "koma-notary" \
+  --apple-id "<Apple ID>" \
+  --team-id "F79C2UJ844"
+```
+
+リリース時は `main` ブランチで `prepare`（検査・ビルド・署名・公証・`.zip` 作成）を実行し、動作確認後に `publish`（コミット・タグ付け・GitHub Releases 公開）を実行します。
+
+```sh
+just release prepare 0.1.0
+just release publish 0.1.0
+```
+
 ## 依存ライブラリの出典
 
 - [Makepad](https://github.com/makepad/makepad) は [MIT ライセンス](https://github.com/tyPhoon-collab/makepad/blob/koma/main/LICENSE) で提供されています。
