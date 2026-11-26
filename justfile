@@ -1,4 +1,3 @@
-set shell := ["zsh", "-cu"]
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
 mod makepad 'just/makepad.just'

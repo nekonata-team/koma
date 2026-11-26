@@ -1,5 +1,3 @@
-set shell := ["zsh", "-cu"]
-
 _target_dir := env("CARGO_TARGET_DIR", "target")
 _dist_dir := _target_dir + "/release/dist"
 _app_dir := _dist_dir + "/Koma.app"
