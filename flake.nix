@@ -7,20 +7,20 @@
 
   outputs = { self, nixpkgs }:
     let
-      system = "aarch64-darwin";
-      pkgs = nixpkgs.legacyPackages.${system};
+      darwinPkgs = nixpkgs.legacyPackages.aarch64-darwin;
+      linuxPkgs = nixpkgs.legacyPackages.x86_64-linux;
       version = "0.1.0";
       hash = "sha256-K5x19RBVrYcvQ/4rAbCcKISGDIUI3zi8M6qIZOzqiG8=";
-      koma = pkgs.stdenvNoCC.mkDerivation {
+      koma = darwinPkgs.stdenvNoCC.mkDerivation {
         pname = "koma";
         inherit version;
 
-        src = pkgs.fetchurl {
+        src = darwinPkgs.fetchurl {
           url = "https://github.com/nekonata-team/koma/releases/download/v${version}/Koma-${version}-arm64.zip";
           inherit hash;
         };
 
-        nativeBuildInputs = [ pkgs.unzip ];
+        nativeBuildInputs = [ darwinPkgs.unzip ];
 
         sourceRoot = ".";
         unpackPhase = ''
@@ -47,11 +47,68 @@
           mainProgram = "koma";
         };
       };
+
+      linuxLibs = with linuxPkgs; [
+        alsa-lib
+        at-spi2-atk
+        at-spi2-core
+        atk
+        cairo
+        cups
+        dbus
+        expat
+        fontconfig
+        freetype
+        glib
+        gtk3
+        libdrm
+        libgbm
+        libglvnd
+        libpulseaudio
+        libx11
+        libxcb
+        libxcomposite
+        libxcursor
+        libxdamage
+        libxext
+        libxfixes
+        libxi
+        libxkbcommon
+        libxrandr
+        libxshmfence
+        mesa
+        nspr
+        nss
+        openssl
+        pango
+        stdenv.cc.cc.lib
+        systemd
+        vulkan-loader
+        wayland
+      ];
     in
     {
-      packages.${system} = {
+      packages.aarch64-darwin = {
         default = koma;
         inherit koma;
+      };
+
+      devShells.x86_64-linux.default = linuxPkgs.mkShell {
+        nativeBuildInputs = with linuxPkgs; [
+          cargo
+          cargo-deny
+          cargo-nextest
+          clippy
+          just
+          lefthook
+          pkg-config
+          rustc
+          rustfmt
+        ];
+
+        buildInputs = linuxLibs;
+
+        LD_LIBRARY_PATH = linuxPkgs.lib.makeLibraryPath linuxLibs;
       };
     };
 }
