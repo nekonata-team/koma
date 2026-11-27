@@ -1,4 +1,5 @@
 _target_dir := env("CARGO_TARGET_DIR", "target")
+_bundle_target_dir := _target_dir + "/makepad-bundle"
 _dist_dir := _target_dir + "/release/dist"
 _app_dir := _dist_dir + "/Koma.app"
 _entitlements := "crates/koma-app/macos/entitlements.plist"
@@ -30,20 +31,38 @@ macos:
     fi
     test -d "$cef_dist" || { echo "Missing CEF framework: $cef_dist" >&2; exit 1; }
 
-    cargo build --release --locked --target aarch64-apple-darwin -p koma-app -p koma-cli -p koma-browser-host
-    arch_bin="{{_target_dir}}/aarch64-apple-darwin/release"
+    # MAKEPAD_PACKAGE_DIR=resources はコンパイル時に埋め込まれるため通常ビルドと target を分ける
+    CARGO_TARGET_DIR="{{_bundle_target_dir}}" MAKEPAD_PACKAGE_DIR=resources \
+        cargo build --release --locked --target aarch64-apple-darwin -p koma-app -p koma-cli -p koma-browser-host
+    arch_bin="{{_bundle_target_dir}}/aarch64-apple-darwin/release"
 
     rm -rf "{{_app_dir}}"
     contents="{{_app_dir}}/Contents"
     macos_dir="$contents/MacOS"
+    resources_dir="$contents/Resources"
     frameworks="$contents/Frameworks"
-    mkdir -p "$macos_dir" "$frameworks"
+    mkdir -p "$macos_dir" "$resources_dir" "$frameworks"
 
     install -m 644 crates/koma-app/macos/Info.plist "$contents/Info.plist"
     printf 'APPL????' > "$contents/PkgInfo"
     install -m 755 "$arch_bin/koma-app" "$macos_dir/koma-app"
     install -m 755 "$arch_bin/koma" "$macos_dir/koma"
     install -m 755 "$arch_bin/makepad-app-browser-host" "$macos_dir/makepad-app-browser-host"
+
+    widgets_res="$(cargo metadata --locked --format-version 1 | jq -r '.packages[] | select(.name == "makepad-widgets") | .manifest_path' | sed 's|/Cargo.toml$|/resources|')"
+    test -d "$widgets_res" || { echo "Missing makepad-widgets resources: $widgets_res" >&2; exit 1; }
+    mkdir -p "$resources_dir/makepad_widgets/resources"
+    ditto "$widgets_res/icons" "$resources_dir/makepad_widgets/resources/icons"
+    fonts=(${(f)"$(strings -a "$macos_dir/koma-app" | awk '/^format=makepad\.font-assets\.v1$/{p=1;next} p && /^asset=/{sub(/^asset=/,"");print;next} p && !/^set=/{p=0}')"})
+    (( ${#fonts} > 0 )) || { echo "Missing font asset manifest in $macos_dir/koma-app" >&2; exit 1; }
+    for asset in "${fonts[@]}"; do
+        [[ "$asset" == makepad_widgets/resources/* ]] || { echo "Unexpected font asset: $asset" >&2; exit 1; }
+        rel="${asset#makepad_widgets/resources/}"
+        install -m 644 "$widgets_res/$rel" "$resources_dir/makepad_widgets/resources/$rel"
+    done
+    printf 'makepad_widgets\tresources/makepad_widgets\n' > "$resources_dir/koma-app.makepad-package-paths"
+    ln -s ../Resources "$macos_dir/resources"
+    ln -s ../Resources/koma-app.makepad-package-paths "$macos_dir/koma-app.makepad-package-paths"
 
     ditto "$cef_dist" "$frameworks/Chromium Embedded Framework.framework"
 
