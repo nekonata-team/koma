@@ -72,8 +72,12 @@ mod tests {
 
     #[test]
     fn notifications_track_unread_and_focus_source_across_sheets() {
-        let mut state = WorkspaceState::poc_default();
-        let n1 = state.push_notification("sheet2-term".into(), "Build", "Done");
+        let mut state = WorkspaceState::new();
+        state.add_sheet(true);
+        let target = state.focused_koma().unwrap().id.clone();
+        state.switch_sheet(0);
+
+        let n1 = state.push_notification(target.clone(), "Build", "Done");
         assert_eq!(state.unread_notification_count(), 1);
 
         state.mark_notification_read(&n1.id, false).unwrap();
@@ -82,7 +86,7 @@ mod tests {
         assert_eq!(state.unread_notification_count(), 1);
 
         let focused = state.focus_notification_source(Some(&n1.id)).unwrap();
-        assert_eq!(focused.as_str(), "sheet2-term");
+        assert_eq!(focused, target);
         assert_eq!(state.active_sheet, 1);
         assert_eq!(state.focused_koma().unwrap().id, focused);
         assert_eq!(state.unread_notification_count(), 0);

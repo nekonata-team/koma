@@ -1,10 +1,8 @@
-//! Workspace layout restoration and test fixture construction.
+//! Workspace layout restoration.
 
 use std::collections::HashMap;
 
-use super::{
-    InputMode, KomaKind, KomaMeta, SheetId, SheetState, WorkspaceState, DEFAULT_KOMA_WIDTH,
-};
+use super::{KomaMeta, SheetId, SheetState, WorkspaceState};
 
 impl WorkspaceState {
     /// Restore Sheets and Drawer while initializing transient state as for a new Workspace.
@@ -77,106 +75,11 @@ impl WorkspaceState {
             ..Self::new()
         })
     }
-
-    /// Two-Sheet fixture used by unit tests.
-    pub fn poc_default() -> Self {
-        let profile_id = "profile-a".to_string();
-        Self {
-            profile_id: profile_id.clone(),
-            is_private: false,
-            mode: InputMode::ContentInput,
-            active_sheet: 0,
-            next_koma_seq: 1,
-            next_sheet_seq: 3,
-            drawer: Vec::new(),
-            discarded_drawer: Vec::new(),
-            closed_komas: Vec::new(),
-            drawer_open: false,
-            drawer_selected: 0,
-            notifications: Vec::new(),
-            next_notification_seq: 1,
-            notifications_open: false,
-            notification_selected: 0,
-            recents: Vec::new(),
-            personal_presets: Vec::new(),
-            sheets: vec![
-                SheetState {
-                    id: "sheet-1".into(),
-                    label: "Sheet 1".into(),
-                    focused_koma_id: Some("sheet1-term".into()),
-                    komas: vec![
-                        KomaMeta {
-                            id: "sheet1-term".into(),
-                            sheet_id: Some("sheet-1".into()),
-                            profile_id: profile_id.clone(),
-                            kind: KomaKind::Terminal,
-                            label: "Shell 1".into(),
-                            initial_url: None,
-                            cwd: None,
-                            command: None,
-                            width: DEFAULT_KOMA_WIDTH,
-                            ratio: None,
-                            restore: None,
-                            koma_api_enabled: false,
-                        },
-                        KomaMeta {
-                            id: "sheet1-web".into(),
-                            sheet_id: Some("sheet-1".into()),
-                            profile_id: profile_id.clone(),
-                            kind: KomaKind::Web,
-                            label: "Makepad".into(),
-                            initial_url: Some("https://makepad.nl".into()),
-                            cwd: None,
-                            command: None,
-                            width: DEFAULT_KOMA_WIDTH,
-                            ratio: None,
-                            restore: None,
-                            koma_api_enabled: false,
-                        },
-                    ],
-                },
-                SheetState {
-                    id: "sheet-2".into(),
-                    label: "Sheet 2".into(),
-                    focused_koma_id: Some("sheet2-term".into()),
-                    komas: vec![
-                        KomaMeta {
-                            id: "sheet2-term".into(),
-                            sheet_id: Some("sheet-2".into()),
-                            profile_id: profile_id.clone(),
-                            kind: KomaKind::Terminal,
-                            label: "Shell 2".into(),
-                            initial_url: None,
-                            cwd: None,
-                            command: None,
-                            width: DEFAULT_KOMA_WIDTH,
-                            ratio: None,
-                            restore: None,
-                            koma_api_enabled: false,
-                        },
-                        KomaMeta {
-                            id: "sheet2-web".into(),
-                            sheet_id: Some("sheet-2".into()),
-                            profile_id,
-                            kind: KomaKind::Web,
-                            label: "Example".into(),
-                            initial_url: Some("https://example.com".into()),
-                            cwd: None,
-                            command: None,
-                            width: DEFAULT_KOMA_WIDTH,
-                            ratio: None,
-                            restore: None,
-                            koma_api_enabled: false,
-                        },
-                    ],
-                },
-            ],
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::KomaKind;
     use super::*;
 
     #[test]
@@ -190,7 +93,9 @@ mod tests {
 
     #[test]
     fn restore_layout_drops_a_stale_koma_focus() {
-        let mut sheets = WorkspaceState::poc_default().sheets;
+        let mut state = WorkspaceState::new();
+        state.add_sheet(true);
+        let mut sheets = state.sheets;
         sheets[1].focused_koma_id = Some("missing".into());
         let state = WorkspaceState::restore_layout("profile-a".into(), sheets, 1, vec![]).unwrap();
         assert_eq!(state.active_sheet_index(), 1);
@@ -199,21 +104,24 @@ mod tests {
 
     #[test]
     fn restore_layout_rejects_mismatched_koma_sheet_id() {
-        let mut sheets = WorkspaceState::poc_default().sheets;
-        sheets[0].komas[0].sheet_id = Some("sheet-2".into());
+        let mut state = WorkspaceState::new();
+        state.insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None);
+        state.add_sheet(false);
+        let base = state.sheets;
+
+        let mut sheets = base.clone();
+        sheets[0].komas[0].sheet_id = Some(sheets[1].id.clone());
         assert!(WorkspaceState::restore_layout("profile-a".into(), sheets, 0, vec![]).is_err());
 
-        let mut sheets = WorkspaceState::poc_default().sheets;
+        let mut sheets = base.clone();
         sheets[0].komas[0].sheet_id = None;
         assert!(WorkspaceState::restore_layout("profile-a".into(), sheets, 0, vec![]).is_err());
 
-        let sheets = WorkspaceState::poc_default().sheets;
-        let mut drawer_koma = sheets[0].komas[0].clone();
+        let mut drawer_koma = base[0].komas[0].clone();
         drawer_koma.id = "drawer-1".into();
         // drawer_koma still has sheet_id = Some("sheet-1"), which is invalid in Drawer
         assert!(
-            WorkspaceState::restore_layout("profile-a".into(), sheets, 0, vec![drawer_koma])
-                .is_err()
+            WorkspaceState::restore_layout("profile-a".into(), base, 0, vec![drawer_koma]).is_err()
         );
     }
 }

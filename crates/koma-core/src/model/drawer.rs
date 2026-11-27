@@ -106,9 +106,20 @@ mod tests {
 
     #[test]
     fn drawer_lifecycle_stows_keeps_places_discards_and_restores() {
-        let mut state = WorkspaceState::poc_default();
+        let mut state = WorkspaceState::new();
+        let term = state.insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None);
+        state.insert_koma_after_focused(
+            KomaKind::Web,
+            "Web".into(),
+            Some("https://example.com".into()),
+            None,
+        );
+        state.focus_koma_by_id(&term.id);
+        state.add_sheet(false);
+        state.switch_sheet(0);
+
         let stowed = state.stow_focused_koma_to_drawer().unwrap();
-        assert_eq!(stowed.id.as_str(), "sheet1-term");
+        assert_eq!(stowed.id, term.id);
         assert_eq!(stowed.sheet_id, None);
         assert_eq!(state.drawer.len(), 1);
         assert_eq!(state.sheets[0].komas.len(), 1);

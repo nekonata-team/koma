@@ -154,18 +154,26 @@ pub fn candidates(query: &str, state: &WorkspaceState, config: &Config) -> Vec<P
 mod tests {
     use super::*;
     use crate::config::SheetPresetConfig;
+    use koma_core::model::KomaKind;
     use std::collections::BTreeMap;
 
     #[test]
     fn empty_query_lists_items_without_open_item() {
-        let items = candidates("", &WorkspaceState::poc_default(), &Config::default());
+        let items = candidates("", &WorkspaceState::new(), &Config::default());
         assert_eq!(items.len(), MAX_CANDIDATES);
         assert!(items.iter().all(|i| i.action != PaletteAction::Open));
     }
 
     #[test]
     fn typed_text_comes_first_then_matching_commands_and_komas() {
-        let state = WorkspaceState::poc_default();
+        let mut state = WorkspaceState::new();
+        let term = state.insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None);
+        let web = state.insert_koma_after_focused(
+            KomaKind::Web,
+            "Web".into(),
+            Some("https://example.com".into()),
+            None,
+        );
         let items = candidates("term", &state, &Config::default());
         assert_eq!(items[0].action, PaletteAction::Open);
         assert!(items
@@ -173,15 +181,15 @@ mod tests {
             .any(|i| i.action == PaletteAction::Run(RouteDecision::CreateTerminal)));
         assert!(items
             .iter()
-            .any(|i| i.action == PaletteAction::FocusKoma("sheet1-term".into())));
+            .any(|i| i.action == PaletteAction::FocusKoma(term.id.clone())));
         assert!(!items
             .iter()
-            .any(|i| i.action == PaletteAction::FocusKoma("sheet1-web".into())));
+            .any(|i| i.action == PaletteAction::FocusKoma(web.id.clone())));
     }
 
     #[test]
     fn leading_gt_restricts_to_commands_only() {
-        let mut state = WorkspaceState::poc_default();
+        let mut state = WorkspaceState::new();
         state.record_recent("https://private.example", "Private");
         let items = candidates("> priv", &state, &Config::default());
         assert_eq!(items.len(), 1);
@@ -195,7 +203,7 @@ mod tests {
     fn default_browser_commands_are_only_offered_on_macos() {
         let items = candidates(
             "> default browser",
-            &WorkspaceState::poc_default(),
+            &WorkspaceState::new(),
             &Config::default(),
         );
         assert_eq!(items.len(), if cfg!(target_os = "macos") { 2 } else { 0 });
@@ -203,7 +211,14 @@ mod tests {
 
     #[test]
     fn lists_only_available_presets_in_precedence_order() {
-        let mut state = WorkspaceState::poc_default();
+        let mut state = WorkspaceState::new();
+        state.insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None);
+        state.insert_koma_after_focused(
+            KomaKind::Web,
+            "Web".into(),
+            Some("https://example.com".into()),
+            None,
+        );
         state.save_current_sheet_as_preset("Personal").unwrap();
         let config = Config::parse(
             r#"
@@ -237,7 +252,7 @@ komas = [":terminal", ":terminal /tmp"]
 
     #[test]
     fn includes_aliases_recents_and_presets() {
-        let mut state = WorkspaceState::poc_default();
+        let mut state = WorkspaceState::new();
         state.record_recent("https://docs.rs", "Docs");
         let mut aliases = BTreeMap::new();
         aliases.insert("gh".into(), "https://github.com".into());

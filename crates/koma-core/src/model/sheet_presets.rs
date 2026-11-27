@@ -123,7 +123,14 @@ mod tests {
 
     #[test]
     fn sheet_preset_saves_applies_and_stays_atomic_on_invalid_input() {
-        let mut state = WorkspaceState::poc_default();
+        let mut state = WorkspaceState::new();
+        state.insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None);
+        state.insert_koma_after_focused(
+            KomaKind::Web,
+            "Makepad".into(),
+            Some("https://makepad.nl".into()),
+            None,
+        );
         let preset = state.save_current_sheet_as_preset("Work").unwrap();
         assert_eq!(preset.name, "Work");
         assert_eq!(
@@ -140,13 +147,13 @@ mod tests {
         let (idx, removed) = state
             .apply_sheet_preset("Work", &preset.komas, None, true)
             .unwrap();
-        assert_eq!(idx, 2);
+        assert_eq!(idx, 1);
         assert!(removed.is_empty());
-        assert_eq!(state.sheets[2].label, "Work");
-        assert_eq!(state.sheets[2].komas.len(), 2);
-        assert_eq!(state.sheets[2].komas[0].kind, KomaKind::Terminal);
+        assert_eq!(state.sheets[1].label, "Work");
+        assert_eq!(state.sheets[1].komas.len(), 2);
+        assert_eq!(state.sheets[1].komas[0].kind, KomaKind::Terminal);
         assert_eq!(
-            state.sheets[2].komas[1].initial_url.as_deref(),
+            state.sheets[1].komas[1].initial_url.as_deref(),
             Some("https://makepad.nl")
         );
     }

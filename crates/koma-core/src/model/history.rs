@@ -70,20 +70,33 @@ mod tests {
 
     #[test]
     fn reopens_explicitly_closed_komas_in_reverse_order_and_restores_focus() {
-        let mut state = WorkspaceState::poc_default();
+        let mut state = WorkspaceState::new();
+        let terminal = state
+            .insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None)
+            .id;
+        let web = state
+            .insert_koma_after_focused(
+                KomaKind::Web,
+                "Web".into(),
+                Some("https://example.com".into()),
+                None,
+            )
+            .id;
+        state.add_sheet(true);
+        let other_sheet_koma = state.focused_koma().unwrap().id.clone();
+        state.switch_sheet(0);
+
         let original = state.current_sheet().komas.clone();
-        let terminal = &original[0].id;
-        let web = &original[1].id;
-        let term = state.koma_by_id_mut(terminal).unwrap();
+        let term = state.koma_by_id_mut(&terminal).unwrap();
         term.cwd = Some("/work".into());
         term.command = Some("example-command".into());
-        state.close_koma(web, false).unwrap();
-        state.close_koma(terminal, false).unwrap();
-        state.remove_koma_by_id(&"sheet2-term".into()).unwrap();
+        state.close_koma(&web, false).unwrap();
+        state.close_koma(&terminal, false).unwrap();
+        state.remove_koma_by_id(&other_sheet_koma).unwrap();
         state.switch_sheet(1);
 
         let restored = state.reopen_closed_koma().unwrap();
-        assert_eq!(restored.id, *terminal);
+        assert_eq!(restored.id, terminal);
         assert_eq!(restored.cwd.as_deref(), Some("/work"));
         assert_eq!(restored.command, None);
         assert_eq!(state.active_sheet_index(), 0);
@@ -91,14 +104,18 @@ mod tests {
 
         assert_eq!(state.reopen_closed_koma().as_ref(), Some(&original[1]));
         assert_eq!(state.current_sheet().komas, [restored, original[1].clone()]);
-        assert_eq!(state.focused_koma().map(|koma| &koma.id), Some(web));
+        assert_eq!(state.focused_koma().map(|koma| &koma.id), Some(&web));
         assert!(state.reopen_closed_koma().is_none());
     }
 
     #[test]
     fn reopens_next_to_focus_when_the_original_sheet_was_removed() {
-        let mut state = WorkspaceState::poc_default();
-        let id = state.current_sheet().komas[0].id.clone();
+        let mut state = WorkspaceState::new();
+        let id = state
+            .insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None)
+            .id;
+        state.add_sheet(true);
+        state.switch_sheet(0);
         state.close_koma(&id, false).unwrap();
         state.remove_current_sheet().unwrap();
         let target = state.current_sheet().id.clone();

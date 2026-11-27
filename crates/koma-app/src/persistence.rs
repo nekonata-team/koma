@@ -343,9 +343,30 @@ mod tests {
         );
 
         // Unique IDs that do not follow the current allocation format are still valid.
-        save(&dir, &WorkspaceState::poc_default()).unwrap();
+        let mut custom = WorkspaceState::new();
+        let mut koma = custom.insert_koma_after_focused(
+            KomaKind::Web,
+            "Custom".into(),
+            Some("https://example.com".into()),
+            None,
+        );
+        koma.id = "custom-web".into();
+        koma.sheet_id = Some("custom-sheet".into());
+        let custom = WorkspaceState::restore_layout(
+            "default".into(),
+            vec![SheetState {
+                id: "custom-sheet".into(),
+                label: "Custom".into(),
+                focused_koma_id: Some("custom-web".into()),
+                komas: vec![koma],
+            }],
+            0,
+            vec![],
+        )
+        .unwrap();
+        save(&dir, &custom).unwrap();
         let loaded = load(&dir).unwrap().unwrap();
-        assert!(loaded.koma_by_id(&"sheet1-web".into()).is_some());
+        assert!(loaded.koma_by_id(&"custom-web".into()).is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -385,8 +406,9 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_sheet_ids() {
-        let mut saved =
-            SavedState::deserialize_json(&to_json(&WorkspaceState::poc_default())).unwrap();
+        let mut state = WorkspaceState::new();
+        state.add_sheet(false);
+        let mut saved = SavedState::deserialize_json(&to_json(&state)).unwrap();
         saved.sheets[1].id = saved.sheets[0].id.clone();
         assert_eq!(
             from_json(&saved.serialize_json()).unwrap_err(),
@@ -399,8 +421,10 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_koma_ids_across_sheets_and_drawer() {
-        let mut saved =
-            SavedState::deserialize_json(&to_json(&WorkspaceState::poc_default())).unwrap();
+        let mut state = WorkspaceState::new();
+        state.insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None);
+        state.add_sheet(true);
+        let mut saved = SavedState::deserialize_json(&to_json(&state)).unwrap();
         let koma = saved.sheets[0].komas[0].clone();
         let first_sheet = saved.sheets[0].id.clone();
         let second_sheet = saved.sheets[1].id.clone();

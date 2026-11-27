@@ -1034,68 +1034,101 @@ mod tests {
 
     #[test]
     fn ambient_targeting_follows_caller_sheet() {
-        let state = WorkspaceState::poc_default();
+        let mut state = WorkspaceState::new();
+        let s1_term = state
+            .insert_koma_after_focused(KomaKind::Terminal, "Shell 1".into(), None, None)
+            .id;
+        let s1_web = state
+            .insert_koma_after_focused(
+                KomaKind::Web,
+                "Web 1".into(),
+                Some("https://example.com".into()),
+                None,
+            )
+            .id;
+        state.add_sheet(true);
+        let s2_term = state.focused_koma().unwrap().id.clone();
+        let s2_web = state
+            .insert_koma_after_focused(
+                KomaKind::Web,
+                "Web 2".into(),
+                Some("https://example.org".into()),
+                None,
+            )
+            .id;
+
         assert_eq!(
             state
-                .resolve_koma(None, Some(&"sheet1-term".into()), KomaKind::Web)
+                .resolve_koma(None, Some(&s1_term), KomaKind::Web)
                 .unwrap()
-                .id
-                .as_str(),
-            "sheet1-web"
+                .id,
+            s1_web
         );
         assert_eq!(
             state
-                .resolve_koma(None, Some(&"sheet2-term".into()), KomaKind::Web)
+                .resolve_koma(None, Some(&s2_term), KomaKind::Web)
                 .unwrap()
-                .id
-                .as_str(),
-            "sheet2-web"
+                .id,
+            s2_web
         );
         assert_eq!(
             state
-                .resolve_koma(None, Some(&"sheet2-term".into()), KomaKind::Terminal)
+                .resolve_koma(None, Some(&s2_term), KomaKind::Terminal)
                 .unwrap()
-                .id
-                .as_str(),
-            "sheet2-term"
+                .id,
+            s2_term
         );
     }
 
     #[test]
     fn explicit_koma_overrides_ambient_and_rejects_mismatch() {
-        let state = WorkspaceState::poc_default();
+        let mut state = WorkspaceState::new();
+        let s1_term = state
+            .insert_koma_after_focused(KomaKind::Terminal, "Shell 1".into(), None, None)
+            .id;
+        state.add_sheet(false);
+        let s2_web = state
+            .insert_koma_after_focused(
+                KomaKind::Web,
+                "Web 2".into(),
+                Some("https://example.com".into()),
+                None,
+            )
+            .id;
+
         assert_eq!(
             state
-                .resolve_koma(
-                    Some(&"sheet2-web".into()),
-                    Some(&"sheet1-term".into()),
-                    KomaKind::Web
-                )
+                .resolve_koma(Some(&s2_web), Some(&s1_term), KomaKind::Web)
                 .unwrap()
-                .id
-                .as_str(),
-            "sheet2-web"
+                .id,
+            s2_web
         );
         assert!(state
-            .resolve_koma(
-                Some(&"missing".into()),
-                Some(&"sheet1-term".into()),
-                KomaKind::Web
-            )
+            .resolve_koma(Some(&"missing".into()), Some(&s1_term), KomaKind::Web)
             .is_err());
         assert!(state
-            .resolve_koma(
-                Some(&"sheet1-term".into()),
-                Some(&"sheet1-term".into()),
-                KomaKind::Web
-            )
+            .resolve_koma(Some(&s1_term), Some(&s1_term), KomaKind::Web)
             .is_err());
     }
 
     #[test]
     fn koma_insertion_focus_reorder_resize_and_removal_update_sheet() {
-        let mut state = WorkspaceState::poc_default();
-        assert_eq!(state.focused_koma().unwrap().id.as_str(), "sheet1-term");
+        let mut state = WorkspaceState::new();
+        let s1_term = state
+            .insert_koma_after_focused(KomaKind::Terminal, "Shell 1".into(), None, None)
+            .id;
+        let s1_web = state
+            .insert_koma_after_focused(
+                KomaKind::Web,
+                "Web 1".into(),
+                Some("https://example.com".into()),
+                None,
+            )
+            .id;
+        state.add_sheet(true);
+        let s2_term = state.focused_koma().unwrap().id.clone();
+        state.focus_koma_by_id(&s1_term);
+        assert_eq!(state.focused_koma().unwrap().id, s1_term);
 
         let created = state.insert_koma_after_focused(
             KomaKind::Web,
@@ -1103,26 +1136,13 @@ mod tests {
             Some("https://docs.rs".into()),
             None,
         );
-        let ids: Vec<&str> = state
-            .current_sheet()
-            .komas
-            .iter()
-            .map(|b| b.id.as_str())
-            .collect();
-        assert_eq!(ids, vec!["sheet1-term", created.id.as_str(), "sheet1-web"]);
+        let ids: Vec<&KomaId> = state.current_sheet().komas.iter().map(|b| &b.id).collect();
+        assert_eq!(ids, vec![&s1_term, &created.id, &s1_web]);
         assert_eq!(state.focused_koma().unwrap().id, created.id);
 
         assert!(state.move_focused_koma(1));
-        let moved_ids: Vec<&str> = state
-            .current_sheet()
-            .komas
-            .iter()
-            .map(|b| b.id.as_str())
-            .collect();
-        assert_eq!(
-            moved_ids,
-            vec!["sheet1-term", "sheet1-web", created.id.as_str()]
-        );
+        let moved_ids: Vec<&KomaId> = state.current_sheet().komas.iter().map(|b| &b.id).collect();
+        assert_eq!(moved_ids, vec![&s1_term, &s1_web, &created.id]);
 
         assert!(state.resize_focused_koma(KOMA_WIDTH_STEP, 1260.0, 10.0));
         assert_eq!(
@@ -1132,22 +1152,19 @@ mod tests {
 
         let removed = state.remove_focused_koma().unwrap();
         assert_eq!(removed.id, created.id);
-        assert_eq!(state.focused_koma().unwrap().id.as_str(), "sheet1-web");
+        assert_eq!(state.focused_koma().unwrap().id, s1_web);
 
         assert!(state.focus_relative_koma(-1));
-        assert_eq!(state.focused_koma().unwrap().id.as_str(), "sheet1-term");
+        assert_eq!(state.focused_koma().unwrap().id, s1_term);
 
         // Removing a koma on an inactive sheet updates that sheet without altering active focus.
         let sheet2_before = state.sheets[1].komas.len();
-        let inactive = state.remove_koma_by_id(&"sheet2-term".into()).unwrap();
-        assert_eq!(inactive.id.as_str(), "sheet2-term");
+        let inactive = state.remove_koma_by_id(&s2_term).unwrap();
+        assert_eq!(inactive.id, s2_term);
         assert_eq!(state.sheets[1].komas.len(), sheet2_before - 1);
-        assert_ne!(
-            state.sheets[1].focused_koma_id.as_ref().map(KomaId::as_str),
-            Some("sheet2-term")
-        );
-        assert_eq!(state.focused_koma().unwrap().id.as_str(), "sheet1-term");
-        assert!(state.remove_koma_by_id(&"sheet2-term".into()).is_none());
+        assert_ne!(state.sheets[1].focused_koma_id.as_ref(), Some(&s2_term));
+        assert_eq!(state.focused_koma().unwrap().id, s1_term);
+        assert!(state.remove_koma_by_id(&s2_term).is_none());
 
         // Closing with prefer-left focuses the left neighbor when one exists.
         let right = state.insert_koma_after_focused(KomaKind::Terminal, "Right".into(), None, None);
@@ -1161,7 +1178,10 @@ mod tests {
 
     #[test]
     fn width_presets_cycle_maximize_toggles_and_resize_clears_ratio() {
-        let mut state = WorkspaceState::poc_default();
+        let mut state = WorkspaceState::new();
+        let term = state
+            .insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None)
+            .id;
         let presets = DEFAULT_WIDTH_PRESETS;
         assert!(state.cycle_width_preset(&presets));
         assert_eq!(state.focused_koma().unwrap().ratio, Some(presets[0]));
@@ -1191,13 +1211,11 @@ mod tests {
         assert!(!state.apply_width_preset(&presets, 99));
 
         assert_eq!(
-            state
-                .rename_koma(&"sheet1-term".into(), "  API Server  ")
-                .unwrap(),
+            state.rename_koma(&term, "  API Server  ").unwrap(),
             "API Server"
         );
         assert_eq!(state.focused_koma().unwrap().label, "API Server");
-        assert!(state.rename_koma(&"sheet1-term".into(), "   ").is_err());
+        assert!(state.rename_koma(&term, "   ").is_err());
 
         assert_eq!(
             state.rename_sheet(&"sheet-1".into(), "  Work  ").unwrap(),
@@ -1209,7 +1227,9 @@ mod tests {
 
     #[test]
     fn sheet_creation_and_relative_switching_work() {
-        let mut state = WorkspaceState::poc_default();
+        let mut state = WorkspaceState::new();
+        state.add_sheet(false);
+        state.switch_sheet(0);
         let idx = state.add_sheet(true);
         assert_eq!(idx, 2);
         assert_eq!(state.active_sheet, 2);
@@ -1225,54 +1245,74 @@ mod tests {
 
     #[test]
     fn move_focused_koma_to_sheet_and_position_updates_sheets_cleanly() {
-        let mut state = WorkspaceState::poc_default();
+        let mut state = WorkspaceState::new();
+        let s1_term = state
+            .insert_koma_after_focused(KomaKind::Terminal, "Shell 1".into(), None, None)
+            .id;
+        let s1_web = state
+            .insert_koma_after_focused(
+                KomaKind::Web,
+                "Web 1".into(),
+                Some("https://example.com".into()),
+                None,
+            )
+            .id;
+        state.add_sheet(true);
+        let s2_term = state.focused_koma().unwrap().id.clone();
+        let s2_web = state
+            .insert_koma_after_focused(
+                KomaKind::Web,
+                "Web 2".into(),
+                Some("https://example.org".into()),
+                None,
+            )
+            .id;
+        state.focus_koma_by_id(&s2_term);
+        state.focus_koma_by_id(&s1_term);
         assert!(!state.move_focused_koma_to_sheet(-1));
 
-        // Move sheet1-term from Sheet 1 to Sheet 2 after focused sheet2-term.
+        // Move s1_term from Sheet 1 to Sheet 2 after focused s2_term.
         assert!(state.move_focused_koma_to_sheet(1));
         assert_eq!(state.active_sheet, 1);
         assert_eq!(
             state.sheets[0]
                 .komas
                 .iter()
-                .map(|b| b.id.as_str())
+                .map(|b| &b.id)
                 .collect::<Vec<_>>(),
-            vec!["sheet1-web"]
+            vec![&s1_web]
         );
-        assert_eq!(
-            state.sheets[0].focused_koma_id.as_ref().map(KomaId::as_str),
-            Some("sheet1-web")
-        );
+        assert_eq!(state.sheets[0].focused_koma_id.as_ref(), Some(&s1_web));
         assert_eq!(
             state.sheets[1]
                 .komas
                 .iter()
-                .map(|b| b.id.as_str())
+                .map(|b| &b.id)
                 .collect::<Vec<_>>(),
-            vec!["sheet2-term", "sheet1-term", "sheet2-web"]
+            vec![&s2_term, &s1_term, &s2_web]
         );
-        assert_eq!(state.focused_koma().unwrap().id.as_str(), "sheet1-term");
+        assert_eq!(state.focused_koma().unwrap().id, s1_term);
         assert_eq!(
             state.focused_koma().unwrap().sheet_id.as_ref(),
             Some(&state.current_sheet().id)
         );
 
         // Same-sheet reorder via drop gap index.
-        assert!(state.move_koma_to_position(&"sheet1-term".into(), 1, 3));
+        assert!(state.move_koma_to_position(&s1_term, 1, 3));
         assert_eq!(
             state.sheets[1]
                 .komas
                 .iter()
-                .map(|b| b.id.as_str())
+                .map(|b| &b.id)
                 .collect::<Vec<_>>(),
-            vec!["sheet2-term", "sheet2-web", "sheet1-term"]
+            vec![&s2_term, &s2_web, &s1_term]
         );
 
         // Move last koma out of Sheet 1 leaving it empty.
-        assert!(state.move_koma_to_position(&"sheet1-web".into(), 1, 0));
+        assert!(state.move_koma_to_position(&s1_web, 1, 0));
         assert!(state.sheets[0].komas.is_empty());
         assert_eq!(state.sheets[0].focused_koma_id, None);
-        assert!(!state.move_koma_to_position(&"sheet1-web".into(), 99, 0));
+        assert!(!state.move_koma_to_position(&s1_web, 99, 0));
     }
 
     #[test]
@@ -1280,8 +1320,8 @@ mod tests {
         let mut state = WorkspaceState::new();
         assert!(state.remove_current_sheet().is_err());
 
-        let mut multi = WorkspaceState::poc_default();
-        multi.active_sheet = 1;
+        let mut multi = WorkspaceState::new();
+        multi.add_sheet(false);
         let removed = multi.remove_current_sheet().unwrap();
         assert_eq!(removed.id.as_str(), "sheet-2");
         assert_eq!(multi.sheets.len(), 1);
