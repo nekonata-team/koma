@@ -8,11 +8,23 @@ use makepad_widgets::*;
 use super::default_browser;
 use super::{App, PromptMode};
 
-fn query_external_sessions(cmd: &str) -> Result<Vec<String>, String> {
+fn query_external_sessions(cmd: &str, shell: Option<&str>) -> Result<Vec<String>, String> {
     #[cfg(windows)]
-    let output = std::process::Command::new("cmd").args(["/C", cmd]).output();
+    let output = {
+        let _ = shell;
+        std::process::Command::new("cmd").args(["/C", cmd]).output()
+    };
     #[cfg(not(windows))]
-    let output = std::process::Command::new("sh").args(["-c", cmd]).output();
+    let output = {
+        let shell = shell
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .or_else(|| std::env::var("SHELL").ok().filter(|s| !s.is_empty()))
+            .unwrap_or_else(|| "/bin/zsh".to_owned());
+        std::process::Command::new(&shell)
+            .args(["-l", "-c", cmd])
+            .output()
+    };
     let out = output.map_err(|e| format!("Failed to run session_list_command: {e}"))?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -118,6 +130,10 @@ impl App {
                     .map(|(u, _)| u)
             })?
         });
+        let had_terminal_command = self
+            .state
+            .focused_koma()
+            .is_some_and(|b| b.kind == KomaKind::Terminal && b.command.is_some());
         let needs_sessions = self.state.focused_koma().is_some_and(|b| {
             b.kind == KomaKind::Terminal
                 && b.command.as_deref().is_some_and(|cmd| {
@@ -130,7 +146,7 @@ impl App {
         });
         let extra_sessions = if needs_sessions {
             if let Some(cmd) = self.config.terminal.session_list_command.as_deref() {
-                match query_external_sessions(cmd) {
+                match query_external_sessions(cmd, self.config.terminal.shell.as_deref()) {
                     Ok(names) => names,
                     Err(err) => {
                         self.show_toast(cx, err);
@@ -148,9 +164,17 @@ impl App {
             &extra_sessions,
             live_url,
         ) {
-            Ok(_) => {
+            Ok(duplicated) => {
                 self.state.mode = InputMode::ContentInput;
                 self.sync_after_mutation(cx, true);
+                if had_terminal_command && duplicated.command.is_none() {
+                    let msg = if needs_sessions {
+                        "Opened plain shell (could not derive next session name)"
+                    } else {
+                        "Opened plain shell (command did not match terminal.session_prefixes)"
+                    };
+                    self.show_toast(cx, msg);
+                }
             }
             Err(err) => self.show_toast(cx, err),
         }
@@ -380,5 +404,24 @@ impl App {
             RouteDecision::SetDefaultBrowser => default_browser::set(),
             RouteDecision::Forward | RouteDecision::Consume => {}
         }
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+mod tests {
+    use super::query_external_sessions;
+
+    #[test]
+    fn query_external_sessions_runs_via_login_shell_and_parses_lines() {
+        let out =
+            query_external_sessions("printf ' alpha \\n\\nbeta\\n'", Some("/bin/sh")).unwrap();
+        assert_eq!(out, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn query_external_sessions_reports_nonzero_exit() {
+        let err = query_external_sessions("echo boom >&2; exit 2", Some("/bin/sh")).unwrap_err();
+        assert!(err.contains("session_list_command failed"));
+        assert!(err.contains("boom"));
     }
 }
