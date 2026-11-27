@@ -95,4 +95,4 @@ deny:
 check: fmt-check clippy deny
 
 # 検査とテストを一括実行する
-ci: check test::default
+ci: check test::all
