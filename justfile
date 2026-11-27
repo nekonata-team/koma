@@ -82,7 +82,7 @@ fmt-check:
 clippy *args:
     cargo clippy {{_koma_packages}} --locked --all-targets --no-deps "$@" -- -D warnings
 
-# 依存境界とライセンス・ソースを検査する
+# 依存境界とソースを検査する
 deny:
     cargo deny --locked --all-features --manifest-path crates/koma-core/Cargo.toml --config checks/deny-core.toml check bans
     cargo deny --locked --all-features --manifest-path crates/koma-cli/Cargo.toml --config checks/deny-headless.toml check bans
