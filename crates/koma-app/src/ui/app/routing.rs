@@ -4,9 +4,9 @@ use koma_app::domain::router::{Key, KeyStroke, RouteDecision};
 use koma_core::model::{InputMode, KomaKind};
 use makepad_widgets::*;
 
+use super::{latest_web_url_with, App, PromptMode};
 #[cfg(target_os = "macos")]
-use super::default_browser;
-use super::{App, PromptMode};
+use crate::runtime::platform::default_browser;
 
 fn query_external_sessions(cmd: &str, shell: Option<&str>) -> Result<Vec<String>, String> {
     #[cfg(windows)]
@@ -122,14 +122,10 @@ impl App {
     }
 
     fn duplicate_focused_koma(&mut self, cx: &mut Cx) {
-        let live_url = self.state.focused_koma().and_then(|b| {
-            (b.kind == KomaKind::Web).then(|| {
-                self.web_runtime()
-                    .borrow()
-                    .koma_url_title(&b.id)
-                    .map(|(u, _)| u)
-            })?
-        });
+        let live_url = self
+            .state
+            .focused_koma()
+            .and_then(|b| latest_web_url_with(&self.web_runtime().borrow(), b));
         let had_terminal_command = self
             .state
             .focused_koma()

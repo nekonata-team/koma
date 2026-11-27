@@ -42,6 +42,7 @@ impl StripAnimation {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub(super) struct SheetSlide {
     pub(super) prev_sheet_id: SheetId,
     pub(super) prev_scroll_x: f64,
@@ -105,6 +106,7 @@ pub(super) fn koma_start_x(komas: &[KomaSlot], koma_id: &KomaId, koma_gap: f64) 
     None
 }
 
+#[derive(Debug)]
 pub(super) struct ReorderSlide {
     pub(super) offsets: HashMap<KomaId, f64>,
     pub(super) elapsed: Option<f64>,

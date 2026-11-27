@@ -21,6 +21,7 @@ mod widgets;
 use animation::{CloseGap, StripAnimation};
 use input::{is_horizontal_scroll, PinchTarget, StripDrag};
 use overview::OverviewState;
+use widgets::KomaWidget;
 
 pub const STRIP_SPACING: f64 = 10.0;
 const HEADER_HEIGHT: f64 = 22.0;
@@ -118,6 +119,39 @@ struct SheetSnapshot {
     komas: Vec<KomaSlot>,
 }
 
+impl SheetSnapshot {
+    fn koma_x_span(&self, koma_idx: usize, koma_gap: f64) -> (f64, f64) {
+        let start_x = koma_gap
+            + self.komas[..koma_idx]
+                .iter()
+                .map(|s| s.width + koma_gap)
+                .sum::<f64>();
+        (start_x, start_x + self.komas[koma_idx].width)
+    }
+
+    fn total_width(&self, koma_gap: f64) -> f64 {
+        if self.komas.is_empty() {
+            640.0
+        } else {
+            koma_gap * 2.0
+                + self.komas.iter().map(|b| b.width).sum::<f64>()
+                + koma_gap * self.komas.len().saturating_sub(1) as f64
+        }
+    }
+
+    fn gap_x(&self, insert_idx: usize, koma_gap: f64) -> f64 {
+        if insert_idx == 0 || self.komas.is_empty() {
+            koma_gap * 0.5
+        } else if insert_idx >= self.komas.len() {
+            let (_, ex) = self.koma_x_span(self.komas.len() - 1, koma_gap);
+            ex + koma_gap * 0.5
+        } else {
+            let (sx, _) = self.koma_x_span(insert_idx, koma_gap);
+            sx - koma_gap * 0.5
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct StripThemeColors {
     dark: bool,
@@ -128,6 +162,9 @@ struct StripThemeColors {
     inactive_header: Vec4f,
     hover_border: Vec4f,
     hover_header: Vec4f,
+    overview_active_sheet_border: Vec4f,
+    overview_active_sheet_bg: Vec4f,
+    overview_inactive_sheet_bg: Vec4f,
 }
 
 impl Default for StripThemeColors {
@@ -148,6 +185,9 @@ impl StripThemeColors {
                 inactive_header: vec4(0.09, 0.10, 0.15, 1.0),
                 hover_border: vec4(0.48, 0.64, 0.97, 1.0),
                 hover_header: vec4(0.14, 0.19, 0.30, 1.0),
+                overview_active_sheet_border: vec4(0.18, 0.36, 0.56, 1.0),
+                overview_active_sheet_bg: vec4(0.08, 0.10, 0.16, 1.0),
+                overview_inactive_sheet_bg: vec4(0.06, 0.08, 0.12, 1.0),
             }
         } else {
             Self {
@@ -159,8 +199,202 @@ impl StripThemeColors {
                 inactive_header: vec4(0.91, 0.93, 0.96, 1.0),
                 hover_border: vec4(0.35, 0.55, 0.95, 1.0),
                 hover_header: vec4(0.88, 0.92, 0.98, 1.0),
+                overview_active_sheet_border: vec4(0.45, 0.67, 0.86, 1.0),
+                overview_active_sheet_bg: vec4(0.95, 0.96, 0.98, 1.0),
+                overview_inactive_sheet_bg: vec4(0.90, 0.92, 0.95, 1.0),
             }
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CardStyle {
+    focused: bool,
+    highlight_glow: bool,
+    hovered: bool,
+}
+
+struct CardDrawer<'a> {
+    mode: InputMode,
+    theme_colors: StripThemeColors,
+    accent_color: Vec4f,
+    koma_gap: f64,
+    draw_border: &'a mut DrawColor,
+    draw_header: &'a mut DrawColor,
+    draw_title: &'a mut DrawText,
+    koma_widgets: &'a mut HashMap<KomaId, KomaWidget>,
+}
+
+impl CardDrawer<'_> {
+    fn slot_colors(&self, focused: bool, hovered: bool) -> (Vec4f, Vec4f) {
+        let t = &self.theme_colors;
+        if self.mode == InputMode::Overview {
+            if focused {
+                return (t.koma_mode_border, t.overview_focus_header);
+            }
+            if hovered {
+                return (t.hover_border, t.hover_header);
+            }
+            return (t.inactive_border, t.inactive_header);
+        }
+        if !focused {
+            return (t.inactive_border, t.inactive_header);
+        }
+        match self.mode {
+            InputMode::KomaMode => (t.koma_mode_border, t.koma_mode_header),
+            InputMode::ContentInput => {
+                // Reuse `draw_drop_bar.color` so ContentInput focus tracks `theme.color_primary`.
+                let accent = self.accent_color;
+                let mix = if t.dark { 0.20 } else { 0.14 };
+                let header = t.inactive_header * (1.0 - mix) + accent * mix;
+                (accent, vec4(header.x, header.y, header.z, 1.0))
+            }
+            InputMode::Overview => (t.koma_mode_border, t.overview_focus_header),
+        }
+    }
+
+    fn draw_card(
+        &mut self,
+        cx: &mut Cx2d,
+        scope: &mut Scope,
+        slot: &KomaSlot,
+        card_walk: Walk,
+        style: CardStyle,
+    ) -> Rect {
+        let (border_color, header_color) = self.slot_colors(style.focused, style.hovered);
+        let card_preview = cx.peek_walk_turtle(card_walk);
+        if style.highlight_glow && (style.focused || style.hovered) {
+            let glow_rect = Rect {
+                pos: card_preview.pos - dvec2(4.0, 4.0),
+                size: card_preview.size + dvec2(8.0, 8.0),
+            };
+            self.draw_border.color = border_color;
+            self.draw_border.draw_abs(cx, glow_rect);
+        } else {
+            self.draw_border.color = border_color;
+            self.draw_border.draw_abs(cx, card_preview);
+        }
+
+        cx.begin_turtle(
+            card_walk,
+            Layout {
+                flow: Flow::Down,
+                padding: Inset {
+                    left: 2.0,
+                    right: 2.0,
+                    top: 2.0,
+                    bottom: 2.0,
+                },
+                spacing: 0.0,
+                ..Layout::default()
+            },
+        );
+
+        let header_walk = Walk::new(Size::fill(), Size::Fixed(HEADER_HEIGHT));
+        let header_rect = cx.peek_walk_turtle(header_walk);
+        self.draw_header.color = header_color;
+        self.draw_header.draw_abs(cx, header_rect);
+
+        cx.begin_turtle(
+            header_walk,
+            Layout {
+                flow: Flow::Right {
+                    row_align: RowAlign::Top,
+                    wrap: false,
+                },
+                padding: Inset {
+                    left: 8.0,
+                    right: 8.0,
+                    top: 0.0,
+                    bottom: 0.0,
+                },
+                align: Align { x: 0.0, y: 0.5 },
+                ..Layout::default()
+            },
+        );
+        let marker = if style.focused {
+            match self.mode {
+                InputMode::KomaMode => "[KOMA] ",
+                InputMode::Overview => "[OVW] ",
+                InputMode::ContentInput => "* ",
+            }
+        } else {
+            ""
+        };
+        let kind_tag = match slot.kind {
+            KomaKind::Terminal => "TERM",
+            KomaKind::Web => "WEB",
+        };
+        let size_tag = match slot.ratio {
+            Some(r) => format!("{}%", (r * 100.0).round() as i32),
+            None => format!("{}px", slot.width.round() as i32),
+        };
+        let detail = if slot.detail.is_empty() || slot.detail == slot.label {
+            String::new()
+        } else {
+            format!(" · {}", slot.detail)
+        };
+        let title = format!("{marker}{kind_tag} | {}{detail} ({size_tag})", slot.label);
+        self.draw_title
+            .draw_walk(cx, Walk::fit(), Align::default(), &title);
+        cx.end_turtle();
+
+        if let Some(widget) = self.koma_widgets.get_mut(&slot.koma_id) {
+            widget
+                .as_widget_mut()
+                .draw_walk_all(cx, scope, Walk::new(Size::fill(), Size::fill()));
+        }
+
+        cx.end_turtle()
+    }
+
+    fn draw_sheet_row_at(
+        &mut self,
+        cx: &mut Cx2d,
+        scope: &mut Scope,
+        slots: &[KomaSlot],
+        origin: Vec2d,
+        row_height: f64,
+        mut card_rects: Option<&mut Vec<(KomaId, Rect)>>,
+    ) {
+        cx.begin_turtle(
+            Walk::new(Size::fit(), Size::Fixed(row_height)).with_abs_pos(origin),
+            Layout {
+                flow: Flow::Right {
+                    row_align: RowAlign::Top,
+                    wrap: false,
+                },
+                spacing: self.koma_gap,
+                ..Layout::default()
+            },
+        );
+        if slots.is_empty() {
+            self.draw_title.draw_walk(
+                cx,
+                Walk::fit(),
+                Align::default(),
+                "Empty Sheet — Cmd+T: Palette | Cmd+Shift+T: Terminal | Ctrl+,: Koma Mode",
+            );
+        } else {
+            for slot in slots {
+                let card_walk = Walk::new(Size::Fixed(slot.width), Size::Fixed(row_height));
+                let drawn_rect = self.draw_card(
+                    cx,
+                    scope,
+                    slot,
+                    card_walk,
+                    CardStyle {
+                        focused: slot.focused,
+                        highlight_glow: false,
+                        hovered: false,
+                    },
+                );
+                if let Some(rects) = card_rects.as_deref_mut() {
+                    rects.push((slot.koma_id.clone(), drawn_rect));
+                }
+            }
+        }
+        cx.end_turtle();
     }
 }
 
@@ -202,7 +436,7 @@ pub struct SheetStrip {
     #[rust]
     terminal_shell: Option<String>,
     #[rust]
-    koma_widgets: HashMap<KomaId, WidgetRef>,
+    koma_widgets: HashMap<KomaId, KomaWidget>,
     #[rust]
     sheets: Vec<SheetSnapshot>,
     #[rust]
@@ -274,44 +508,13 @@ impl SheetStrip {
         }
     }
 
-    fn koma_x_span(&self, sheet: &SheetSnapshot, koma_idx: usize) -> (f64, f64) {
-        let start_x = self.koma_gap
-            + sheet.komas[..koma_idx]
-                .iter()
-                .map(|s| s.width + self.koma_gap)
-                .sum::<f64>();
-        (start_x, start_x + sheet.komas[koma_idx].width)
-    }
-
-    fn sheet_total_width(&self, sheet: &SheetSnapshot) -> f64 {
-        if sheet.komas.is_empty() {
-            640.0
-        } else {
-            self.koma_gap * 2.0
-                + sheet.komas.iter().map(|b| b.width).sum::<f64>()
-                + self.koma_gap * sheet.komas.len().saturating_sub(1) as f64
-        }
-    }
-
-    fn sheet_gap_x(&self, sheet: &SheetSnapshot, insert_idx: usize) -> f64 {
-        if insert_idx == 0 || sheet.komas.is_empty() {
-            self.koma_gap * 0.5
-        } else if insert_idx >= sheet.komas.len() {
-            let (_, ex) = self.koma_x_span(sheet, sheet.komas.len() - 1);
-            ex + self.koma_gap * 0.5
-        } else {
-            let (sx, _) = self.koma_x_span(sheet, insert_idx);
-            sx - self.koma_gap * 0.5
-        }
-    }
-
     fn target_scroll_x_for_koma(&self, koma_id: &KomaId, view_w: f64) -> Option<f64> {
         if view_w <= 1.0 {
             return None;
         }
         let sheet = self.sheets.get(self.active_sheet)?;
         let target_idx = sheet.komas.iter().position(|s| &s.koma_id == koma_id)?;
-        let (start_x, end_x) = self.koma_x_span(sheet, target_idx);
+        let (start_x, end_x) = sheet.koma_x_span(target_idx, self.koma_gap);
         let want_left = (start_x - self.koma_gap).max(0.0);
         let want_right = end_x + self.koma_gap;
         let cur_x = self
@@ -334,8 +537,8 @@ impl SheetStrip {
         }
         let sheet = self.sheets.get(self.active_sheet)?;
         let target_idx = sheet.komas.iter().position(|s| &s.koma_id == koma_id)?;
-        let (start_x, end_x) = self.koma_x_span(sheet, target_idx);
-        let max_scroll = (self.sheet_total_width(sheet) - view_w).max(0.0);
+        let (start_x, end_x) = sheet.koma_x_span(target_idx, self.koma_gap);
+        let max_scroll = (sheet.total_width(self.koma_gap) - view_w).max(0.0);
         Some(((start_x + end_x) * 0.5 - view_w * 0.5).clamp(0.0, max_scroll))
     }
 
@@ -381,129 +584,8 @@ impl SheetStrip {
         }
     }
 
-    fn slot_colors(&self, focused: bool, hovered: bool) -> (Vec4f, Vec4f) {
-        let t = &self.theme_colors;
-        if self.mode == InputMode::Overview {
-            if focused {
-                return (t.koma_mode_border, t.overview_focus_header);
-            }
-            if hovered {
-                return (t.hover_border, t.hover_header);
-            }
-            return (t.inactive_border, t.inactive_header);
-        }
-        if !focused {
-            return (t.inactive_border, t.inactive_header);
-        }
-        match self.mode {
-            InputMode::KomaMode => (t.koma_mode_border, t.koma_mode_header),
-            InputMode::ContentInput => {
-                // Reuse `draw_drop_bar.color` so ContentInput focus tracks `theme.color_primary`.
-                let accent = self.draw_drop_bar.color;
-                let mix = if t.dark { 0.20 } else { 0.14 };
-                let header = t.inactive_header * (1.0 - mix) + accent * mix;
-                (accent, vec4(header.x, header.y, header.z, 1.0))
-            }
-            InputMode::Overview => (t.koma_mode_border, t.overview_focus_header),
-        }
-    }
-
     pub fn set_theme(&mut self, dark: bool) {
         self.theme_colors = StripThemeColors::for_scheme(dark);
-    }
-
-    fn draw_card(
-        &mut self,
-        cx: &mut Cx2d,
-        scope: &mut Scope,
-        slot: &KomaSlot,
-        card_walk: Walk,
-        highlight_glow: bool,
-        hovered: bool,
-    ) -> Rect {
-        let (border_color, header_color) = self.slot_colors(slot.focused, hovered);
-        let card_preview = cx.peek_walk_turtle(card_walk);
-        if highlight_glow && (slot.focused || hovered) {
-            let glow_rect = Rect {
-                pos: card_preview.pos - dvec2(4.0, 4.0),
-                size: card_preview.size + dvec2(8.0, 8.0),
-            };
-            self.draw_border.color = border_color;
-            self.draw_border.draw_abs(cx, glow_rect);
-        } else {
-            self.draw_border.color = border_color;
-            self.draw_border.draw_abs(cx, card_preview);
-        }
-
-        cx.begin_turtle(
-            card_walk,
-            Layout {
-                flow: Flow::Down,
-                padding: Inset {
-                    left: 2.0,
-                    right: 2.0,
-                    top: 2.0,
-                    bottom: 2.0,
-                },
-                spacing: 0.0,
-                ..Layout::default()
-            },
-        );
-
-        let header_walk = Walk::new(Size::fill(), Size::Fixed(HEADER_HEIGHT));
-        let header_rect = cx.peek_walk_turtle(header_walk);
-        self.draw_header.color = header_color;
-        self.draw_header.draw_abs(cx, header_rect);
-
-        cx.begin_turtle(
-            header_walk,
-            Layout {
-                flow: Flow::Right {
-                    row_align: RowAlign::Top,
-                    wrap: false,
-                },
-                padding: Inset {
-                    left: 8.0,
-                    right: 8.0,
-                    top: 0.0,
-                    bottom: 0.0,
-                },
-                align: Align { x: 0.0, y: 0.5 },
-                ..Layout::default()
-            },
-        );
-        let marker = if slot.focused {
-            match self.mode {
-                InputMode::KomaMode => "[KOMA] ",
-                InputMode::Overview => "[OVW] ",
-                InputMode::ContentInput => "* ",
-            }
-        } else {
-            ""
-        };
-        let kind_tag = match slot.kind {
-            KomaKind::Terminal => "TERM",
-            KomaKind::Web => "WEB",
-        };
-        let size_tag = match slot.ratio {
-            Some(r) => format!("{}%", (r * 100.0).round() as i32),
-            None => format!("{}px", slot.width.round() as i32),
-        };
-        let detail = if slot.detail.is_empty() || slot.detail == slot.label {
-            String::new()
-        } else {
-            format!(" · {}", slot.detail)
-        };
-        let title = format!("{marker}{kind_tag} | {}{detail} ({size_tag})", slot.label);
-        self.draw_title
-            .draw_walk(cx, Walk::fit(), Align::default(), &title);
-        cx.end_turtle();
-
-        if let Some(widget) = self.koma_widgets.get_mut(&slot.koma_id) {
-            widget.draw_walk_all(cx, scope, Walk::new(Size::fill(), Size::fill()));
-        }
-
-        cx.end_turtle()
     }
 }
 
@@ -511,7 +593,7 @@ impl Widget for SheetStrip {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
         if matches!(event, Event::Signal | Event::Shutdown) {
             for widget in self.koma_widgets.values_mut() {
-                widget.handle_event(cx, event, scope);
+                widget.as_widget_mut().handle_event(cx, event, scope);
             }
             if matches!(event, Event::Signal) && self.is_overview_rendered() {
                 self.redraw(cx);
@@ -571,13 +653,10 @@ impl Widget for SheetStrip {
         if let Some(sheet) = self.sheets.get(self.active_sheet) {
             for slot in &sheet.komas {
                 if let Some(widget) = self.koma_widgets.get_mut(&slot.koma_id) {
-                    if is_scroll
-                        && horiz_scroll
-                        && (slot.kind == KomaKind::Terminal || strip_claims_x)
-                    {
+                    if is_scroll && horiz_scroll && (widget.is_terminal() || strip_claims_x) {
                         continue;
                     }
-                    widget.handle_event(cx, event, scope);
+                    widget.as_widget_mut().handle_event(cx, event, scope);
                 }
             }
         }
@@ -622,23 +701,30 @@ impl Widget for SheetStrip {
 
         self.card_rects.clear();
         if let Some(slide) = &self.anim.sheet_slide {
-            let prev_id = slide.prev_sheet_id.clone();
             let prev_scroll_x = slide.prev_scroll_x;
             let offset_y = slide.offset_y;
             let direction = slide.direction;
             let prev_slots = self
                 .sheets
                 .iter()
-                .find(|d| d.sheet_id == prev_id)
-                .map(|d| d.komas.clone())
-                .unwrap_or_default();
+                .find(|d| d.sheet_id == slide.prev_sheet_id)
+                .map_or(&[][..], |d| d.komas.as_slice());
             let cur_slots = self
                 .sheets
                 .get(self.active_sheet)
-                .map(|d| d.komas.clone())
-                .unwrap_or_default();
+                .map_or(&[][..], |d| d.komas.as_slice());
             let cur_scroll_x = self.scroll_bars.get_scroll_pos().x;
             let row_h = (outer_rect.size.y - 2.0 * self.koma_gap).max(40.0);
+            let mut drawer = CardDrawer {
+                mode: self.mode,
+                theme_colors: self.theme_colors,
+                accent_color: self.draw_drop_bar.color,
+                koma_gap: self.koma_gap,
+                draw_border: &mut self.draw_border,
+                draw_header: &mut self.draw_header,
+                draw_title: &mut self.draw_title,
+                koma_widgets: &mut self.koma_widgets,
+            };
 
             cx.begin_turtle(
                 Walk::fixed(outer_rect.size.x, outer_rect.size.y).with_abs_pos(outer_rect.pos),
@@ -650,22 +736,22 @@ impl Widget for SheetStrip {
             );
             let prev_y =
                 outer_rect.pos.y + self.koma_gap + offset_y - direction * outer_rect.size.y;
-            self.draw_sheet_row_at(
+            drawer.draw_sheet_row_at(
                 cx,
                 scope,
-                &prev_slots,
+                prev_slots,
                 dvec2(outer_rect.pos.x + self.koma_gap - prev_scroll_x, prev_y),
                 row_h,
-                false,
+                None,
             );
             let cur_y = outer_rect.pos.y + self.koma_gap + offset_y;
-            self.draw_sheet_row_at(
+            drawer.draw_sheet_row_at(
                 cx,
                 scope,
-                &cur_slots,
+                cur_slots,
                 dvec2(outer_rect.pos.x + self.koma_gap - cur_scroll_x, cur_y),
                 row_h,
-                true,
+                Some(&mut self.card_rects),
             );
             cx.end_turtle();
             return DrawStep::done();
@@ -693,8 +779,7 @@ impl Widget for SheetStrip {
         let slots = self
             .sheets
             .get(self.active_sheet)
-            .map(|d| d.komas.clone())
-            .unwrap_or_default();
+            .map_or(&[][..], |d| d.komas.as_slice());
 
         if slots.is_empty() {
             let color = self.draw_title.color;
@@ -709,14 +794,34 @@ impl Widget for SheetStrip {
             );
             self.draw_title.color = color;
         } else {
-            for slot in &slots {
+            let mut drawer = CardDrawer {
+                mode: self.mode,
+                theme_colors: self.theme_colors,
+                accent_color: self.draw_drop_bar.color,
+                koma_gap: self.koma_gap,
+                draw_border: &mut self.draw_border,
+                draw_header: &mut self.draw_header,
+                draw_title: &mut self.draw_title,
+                koma_widgets: &mut self.koma_widgets,
+            };
+            for slot in slots {
                 let gap = self.anim.close_gap_width(&slot.koma_id);
                 let offset = self.anim.reorder_offset(&slot.koma_id);
                 let mut card_walk =
                     Walk::new(Size::Fixed(slot.width), Size::fill()).with_margin_left(gap + offset);
                 // Translate the Koma without changing the row's scroll extent.
                 card_walk.margin.right = -offset;
-                let drawn_rect = self.draw_card(cx, scope, slot, card_walk, false, false);
+                let drawn_rect = drawer.draw_card(
+                    cx,
+                    scope,
+                    slot,
+                    card_walk,
+                    CardStyle {
+                        focused: slot.focused,
+                        highlight_glow: false,
+                        hovered: false,
+                    },
+                );
                 self.card_rects.push((slot.koma_id.clone(), drawn_rect));
             }
             let trailing = self
@@ -740,7 +845,7 @@ impl Widget for SheetStrip {
                         .take(ti.saturating_add(1))
                         .map(|slot| self.anim.close_gap_width(&slot.koma_id))
                         .sum::<f64>();
-                    let gap_x = self.sheet_gap_x(sheet, ti) + motion_gap
+                    let gap_x = sheet.gap_x(ti, self.koma_gap) + motion_gap
                         - self.scroll_bars.get_scroll_pos().x;
                     let bar_rect = Rect {
                         pos: dvec2(
@@ -755,46 +860,5 @@ impl Widget for SheetStrip {
         }
 
         DrawStep::done()
-    }
-}
-
-impl SheetStrip {
-    fn draw_sheet_row_at(
-        &mut self,
-        cx: &mut Cx2d,
-        scope: &mut Scope,
-        slots: &[KomaSlot],
-        origin: Vec2d,
-        row_height: f64,
-        record_hits: bool,
-    ) {
-        cx.begin_turtle(
-            Walk::new(Size::fit(), Size::Fixed(row_height)).with_abs_pos(origin),
-            Layout {
-                flow: Flow::Right {
-                    row_align: RowAlign::Top,
-                    wrap: false,
-                },
-                spacing: self.koma_gap,
-                ..Layout::default()
-            },
-        );
-        if slots.is_empty() {
-            self.draw_title.draw_walk(
-                cx,
-                Walk::fit(),
-                Align::default(),
-                "Empty Sheet — Cmd+T: Palette | Cmd+Shift+T: Terminal | Ctrl+,: Koma Mode",
-            );
-        } else {
-            for slot in slots {
-                let card_walk = Walk::new(Size::Fixed(slot.width), Size::Fixed(row_height));
-                let drawn_rect = self.draw_card(cx, scope, slot, card_walk, false, false);
-                if record_hits {
-                    self.card_rects.push((slot.koma_id.clone(), drawn_rect));
-                }
-            }
-        }
-        cx.end_turtle();
     }
 }

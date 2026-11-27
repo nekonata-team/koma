@@ -1,11 +1,12 @@
 //! `koma` CLI communicating with `koma-app` via IPC.
 
 use std::io::IsTerminal;
-use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use clap::Parser;
-use koma_ipc::protocol::{IpcCommand, IpcPayload, KomaSummary, WorkspaceCommand};
+use koma_ipc::protocol::{
+    IpcCommand, IpcPayload, IpcRequest, IpcResponse, KomaSummary, WorkspaceCommand,
+};
 use koma_ipc::transport::{resolve_socket_path, send_request};
 use makepad_micro_serde::SerJson;
 
@@ -14,18 +15,7 @@ mod web_screenshot;
 mod web_script;
 mod workspace;
 
-use args::Args;
-
-fn resolve_config_path(koma_config: Option<&str>, home: Option<&str>) -> Result<PathBuf, String> {
-    if let Some(path) = koma_config.map(str::trim).filter(|p| !p.is_empty()) {
-        return Ok(PathBuf::from(path));
-    }
-    let home = home
-        .map(str::trim)
-        .filter(|h| !h.is_empty())
-        .ok_or_else(|| "HOME is not set and KOMA_CONFIG is empty".to_string())?;
-    Ok(Path::new(home).join(".config/koma/config.toml"))
-}
+use args::{Args, CliAction, CliEnv};
 
 fn resolve_editor(visual: Option<&str>, editor: Option<&str>) -> String {
     for candidate in [visual, editor] {
@@ -41,11 +31,8 @@ fn resolve_editor(visual: Option<&str>, editor: Option<&str>) -> String {
 }
 
 fn run_settings(path_only: bool, json: bool) -> Result<(), String> {
-    let koma_config = std::env::var("KOMA_CONFIG").ok();
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .ok();
-    let path = resolve_config_path(koma_config.as_deref(), home.as_deref())?;
+    let path = koma_ipc::workspaces::config_path()
+        .ok_or_else(|| "HOME is not set and KOMA_CONFIG is empty".to_string())?;
     if path_only {
         if json {
             println!(
@@ -85,61 +72,68 @@ fn run_settings(path_only: bool, json: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn run(args: Args) -> Result<(), String> {
-    let json = args.json || !std::io::stdout().is_terminal();
-    if let Some(path_only) = args.settings_path_only() {
-        return run_settings(path_only, json);
-    }
-    if args.lists_workspaces() {
-        return workspace::list(json);
-    }
-    let sock = resolve_socket_path(args.socket.as_deref());
-    let is_remote = args.socket.is_some() && sock != resolve_socket_path(None);
-    let script = args
-        .web_script()
-        .map(|(path, timeout)| (path.to_path_buf(), timeout));
-    let screenshot = args.web_screenshot().map(|p| p.map(Path::to_path_buf));
-    let mut req = args.into_request();
-    if is_remote {
+fn send_cli_request(
+    socket_override: Option<&str>,
+    mut req: IpcRequest,
+) -> Result<IpcResponse, String> {
+    let sock = resolve_socket_path(socket_override);
+    if socket_override.is_some() && sock != resolve_socket_path(None) {
         req.caller_koma_id = None;
         req.profile_id = None;
     }
-    let is_health = matches!(req.command, IpcCommand::Workspace(WorkspaceCommand::Health));
-    let resp = send_request(&sock, &req)?;
-    if let Some((file, timeout)) = script {
-        return match resp.into_result()? {
-            IpcPayload::WebScriptTarget(target) => web_script::run(&file, timeout, target),
-            _ => Err("Expected a Web Koma script target from Koma".into()),
-        };
-    }
-    if let Some(output) = screenshot {
-        let target = match resp.into_result()? {
-            IpcPayload::WebScriptTarget(target) => target,
-            _ => return Err("Expected a Web Koma target from Koma".into()),
-        };
-        let path = web_screenshot::capture(output.as_deref(), &target)?;
-        let path_str = path.display().to_string();
-        if json {
-            let payload = IpcPayload::WebScreenshot {
-                koma_id: target.koma_id,
-                path: path_str,
-            };
-            println!(
-                "{}",
-                koma_ipc::protocol::IpcResponse::Ok(payload).serialize_json()
-            );
-        } else {
-            println!("{path_str}");
+    send_request(&sock, &req)
+}
+
+fn run(args: Args) -> Result<(), String> {
+    let json = args.json || !std::io::stdout().is_terminal();
+    let socket_override = args.socket.clone();
+    match args.into_action(CliEnv::from_process())? {
+        CliAction::Settings { path_only } => run_settings(path_only, json),
+        CliAction::WorkspaceList => workspace::list(json),
+        CliAction::WebScript {
+            request,
+            file,
+            timeout,
+        } => {
+            let resp = send_cli_request(socket_override.as_deref(), request)?;
+            match resp.into_result()? {
+                IpcPayload::WebScriptTarget(target) => web_script::run(&file, timeout, target),
+                _ => Err("Expected a Web Koma script target from Koma".into()),
+            }
         }
-        return Ok(());
+        CliAction::WebScreenshot { request, output } => {
+            let resp = send_cli_request(socket_override.as_deref(), request)?;
+            let target = match resp.into_result()? {
+                IpcPayload::WebScriptTarget(target) => target,
+                _ => return Err("Expected a Web Koma target from Koma".into()),
+            };
+            let path = web_screenshot::capture(output.as_deref(), &target)?;
+            let path_str = path.display().to_string();
+            if json {
+                let output = web_screenshot::ScreenshotOutput {
+                    koma_id: target.koma_id,
+                    path: path_str,
+                };
+                println!("{}", output.to_json_response());
+            } else {
+                println!("{path_str}");
+            }
+            Ok(())
+        }
+        CliAction::Ipc(req) => {
+            let is_health = matches!(req.command, IpcCommand::Workspace(WorkspaceCommand::Health));
+            let resp = send_cli_request(socket_override.as_deref(), req)?;
+            if json {
+                println!("{}", resp.serialize_json());
+                return resp.into_result().map(|_| ());
+            }
+            print_ipc_payload(resp.into_result()?, is_health)
+        }
     }
+}
 
-    if json {
-        println!("{}", resp.serialize_json());
-        return resp.into_result().map(|_| ());
-    }
-
-    match resp.into_result()? {
+fn print_ipc_payload(payload: IpcPayload, is_health: bool) -> Result<(), String> {
+    match payload {
         IpcPayload::Ack => {
             if is_health {
                 println!("healthy");
@@ -203,7 +197,6 @@ fn run(args: Args) -> Result<(), String> {
         IpcPayload::WebSnapshot(data) => println!("{}", data.snapshot.unwrap_or_default()),
         IpcPayload::WebScriptTarget(_) => return Err("Unexpected Web Koma script target".into()),
         IpcPayload::WebRead(data) => println!("{}", data.markdown.unwrap_or_default()),
-        IpcPayload::WebScreenshot { path, .. } => println!("{path}"),
         IpcPayload::Text { text, .. } => println!("{text}"),
         IpcPayload::DrawerList { items } => {
             for item in items {
@@ -264,17 +257,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolves_config_path_and_editor() {
-        assert_eq!(
-            resolve_config_path(Some("/tmp/custom.toml"), Some("/Users/test")).unwrap(),
-            PathBuf::from("/tmp/custom.toml")
-        );
-        assert_eq!(
-            resolve_config_path(None, Some("/Users/test")).unwrap(),
-            PathBuf::from("/Users/test/.config/koma/config.toml")
-        );
-        assert!(resolve_config_path(None, None).is_err());
-
+    fn resolves_editor() {
         assert_eq!(resolve_editor(Some("nvim"), Some("vi")), "nvim");
         assert_eq!(resolve_editor(Some("  "), Some("hx")), "hx");
     }

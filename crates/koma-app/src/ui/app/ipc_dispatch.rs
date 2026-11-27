@@ -19,7 +19,7 @@ use koma_ipc::protocol::{
 use makepad_app_terminal::widget::MpTerm;
 use makepad_widgets::*;
 
-use super::{derive_cwd_label, App};
+use super::{derive_cwd_label, home_dir_string, latest_web_url_with, App};
 use crate::runtime::ipc_server::PendingIpc;
 use crate::runtime::profiles::{self, Profile};
 use crate::runtime::web_views::{is_local_html_url, WebViewRuntime};
@@ -33,14 +33,15 @@ fn send_result(reply: IpcReply, result: Result<IpcPayload, String>) {
     });
 }
 
+fn validate_koma_api_url(enabled: bool, url: &str) -> Result<(), String> {
+    if enabled && !is_local_html_url(url) {
+        return Err("--koma-api requires a local .html or .htm file".into());
+    }
+    Ok(())
+}
+
 fn summarize_koma(rt: &WebViewRuntime, sheet: &SheetState, koma: &KomaMeta) -> KomaSummary {
-    let url = (koma.kind == KomaKind::Web)
-        .then(|| {
-            rt.koma_url_title(&koma.id)
-                .map(|(url, _)| url)
-                .or_else(|| koma.initial_url.clone())
-        })
-        .flatten();
+    let url = latest_web_url_with(rt, koma);
     KomaSummary {
         id: koma.id.to_string(),
         kind: koma.kind.as_str().into(),
@@ -309,15 +310,13 @@ impl App {
                 focus,
             }) => {
                 let result = (|| {
-                    let home_dir = std::env::var("HOME").ok();
+                    let home_dir = home_dir_string();
                     let (url, label) = resolve_web_url_with_engine(
                         &raw_url,
                         home_dir.as_deref(),
                         self.config.search_engine,
                     )?;
-                    if koma_api && !is_local_html_url(&url) {
-                        return Err("--koma-api requires a local .html or .htm file".into());
-                    }
+                    validate_koma_api_url(koma_api, &url)?;
                     let target = placement
                         .as_ref()
                         .map(|p| self.resolve_placement(p))
@@ -357,7 +356,7 @@ impl App {
             }) => {
                 let result = (|| {
                     let koma_id = self.resolve_web_koma(koma_id, caller)?;
-                    let home_dir = std::env::var("HOME").ok();
+                    let home_dir = home_dir_string();
                     let (url, label) = resolve_web_url_with_engine(
                         &raw_url,
                         home_dir.as_deref(),
@@ -402,21 +401,8 @@ impl App {
                 let result = (|| {
                     let koma_id = self.resolve_web_koma(koma_id, caller)?;
                     if let Some(enable) = koma_api {
-                        let current_url = self
-                            .web_runtime()
-                            .borrow()
-                            .koma_url_title(&koma_id)
-                            .map(|(u, _)| u)
-                            .filter(|u| !u.is_empty())
-                            .or_else(|| {
-                                self.state
-                                    .koma_by_id(&koma_id)
-                                    .and_then(|b| b.initial_url.clone())
-                            })
-                            .unwrap_or_default();
-                        if enable && !is_local_html_url(&current_url) {
-                            return Err("--koma-api requires a local .html or .htm page".into());
-                        }
+                        let current_url = self.latest_web_url(&koma_id).unwrap_or_default();
+                        validate_koma_api_url(enable, &current_url)?;
                         self.state.set_koma_api_enabled(&koma_id, enable);
                         self.web_runtime()
                             .borrow_mut()
@@ -456,18 +442,7 @@ impl App {
             }
             WebCommand::Url(KomaTarget { koma_id }) => {
                 let result = self.resolve_web_koma(koma_id, caller).map(|koma_id| {
-                    let (url, title) = self
-                        .web_runtime()
-                        .borrow()
-                        .koma_url_title(&koma_id)
-                        .unwrap_or_else(|| {
-                            let fallback = self
-                                .state
-                                .koma_by_id(&koma_id)
-                                .and_then(|b| b.initial_url.clone())
-                                .unwrap_or_default();
-                            (fallback, String::new())
-                        });
+                    let (url, title) = self.latest_web_url_title(&koma_id);
                     IpcPayload::WebUrl {
                         koma_id: koma_id.into_string(),
                         url,
@@ -556,7 +531,7 @@ impl App {
                 {
                     return Err("Terminal command must not be empty".into());
                 }
-                let home_dir = std::env::var("HOME").ok();
+                let home_dir = home_dir_string();
                 let cwd = cwd
                     .as_deref()
                     .map(str::trim)
@@ -666,7 +641,7 @@ impl App {
                 title,
                 koma_api,
             }) => {
-                let home_dir = std::env::var("HOME").ok();
+                let home_dir = home_dir_string();
                 let expanded = self.config.expand_alias(&input)?.unwrap_or(input);
                 match parse_open_koma_input_with_engine(
                     &expanded,
@@ -688,9 +663,7 @@ impl App {
                         })
                     }
                     KomaInput::Web { url, label } => {
-                        if koma_api && !is_local_html_url(&url) {
-                            return Err("--koma-api requires a local .html or .htm file".into());
-                        }
+                        validate_koma_api_url(koma_api, &url)?;
                         let item = self.state.keep_koma_in_drawer(
                             KomaKind::Web,
                             title.unwrap_or(label),

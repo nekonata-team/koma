@@ -392,10 +392,6 @@ pub enum IpcPayload {
     WebSnapshot(WebSnapshotData),
     WebScriptTarget(WebScriptTargetData),
     WebRead(WebReadData),
-    WebScreenshot {
-        koma_id: String,
-        path: String,
-    },
     Text {
         koma_id: String,
         text: String,
@@ -866,10 +862,6 @@ mod tests {
                 title: Some("Hi".into()),
                 url: Some("https://example.com".into()),
             }),
-            IpcPayload::WebScreenshot {
-                koma_id: "k-1".into(),
-                path: "/tmp/shot.png".into(),
-            },
             IpcPayload::Text {
                 koma_id: "t-1".into(),
                 text: "hello\nworld".into(),
@@ -931,7 +923,6 @@ mod tests {
                 | IpcPayload::WebSnapshot(_)
                 | IpcPayload::WebScriptTarget(_)
                 | IpcPayload::WebRead(_)
-                | IpcPayload::WebScreenshot { .. }
                 | IpcPayload::Text { .. }
                 | IpcPayload::DrawerList { .. }
                 | IpcPayload::NotificationSent { .. }

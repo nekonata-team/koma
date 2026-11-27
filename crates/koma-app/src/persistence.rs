@@ -1,5 +1,6 @@
 //! Profile state saved as JSON under `~/.local/state/koma/` (UI-independent).
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use makepad_micro_serde::*;
@@ -257,6 +258,39 @@ pub fn save(dir: &Path, state: &WorkspaceState) -> Result<(), String> {
     std::fs::rename(&tmp, dir.join("state.json")).map_err(|e| format!("save state: {e}"))
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, SerJson, DeJson)]
+pub struct SitePermissionRecord {
+    pub camera: Option<bool>,
+    pub microphone: Option<bool>,
+    pub geolocation: Option<bool>,
+    pub desktop_capture: Option<bool>,
+}
+
+/// Loads `site_permissions.json`; a missing file yields an empty map.
+pub fn load_site_permissions(dir: &Path) -> Result<HashMap<String, SitePermissionRecord>, String> {
+    let path = dir.join("site_permissions.json");
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    HashMap::<String, SitePermissionRecord>::deserialize_json(&raw)
+        .map_err(|e| format!("Invalid site permissions JSON: {e:?}"))
+}
+
+/// Writes `site_permissions.json` atomically (temp file + rename).
+pub fn save_site_permissions(
+    dir: &Path,
+    permissions: &HashMap<String, SitePermissionRecord>,
+) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = dir.join("site_permissions.json");
+    let tmp = dir.join("site_permissions.json.tmp");
+    std::fs::write(&tmp, permissions.serialize_json())
+        .map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("save site permissions: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,5 +430,34 @@ mod tests {
             from_json(&saved.serialize_json()).unwrap_err(),
             "State has no valid active Sheet"
         );
+    }
+
+    #[test]
+    fn site_permissions_save_and_load_round_trip() {
+        let dir = temp_dir("site-permissions-roundtrip");
+        assert!(load_site_permissions(&dir).unwrap().is_empty());
+
+        let mut perms = HashMap::new();
+        perms.insert(
+            "https://meet.example.com".to_string(),
+            SitePermissionRecord {
+                camera: Some(true),
+                microphone: Some(false),
+                geolocation: None,
+                desktop_capture: Some(true),
+            },
+        );
+        save_site_permissions(&dir, &perms).unwrap();
+        assert_eq!(load_site_permissions(&dir).unwrap(), perms);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn invalid_site_permissions_json_returns_err() {
+        let dir = temp_dir("site-permissions-invalid");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("site_permissions.json"), "{ invalid").unwrap();
+        assert!(load_site_permissions(&dir).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

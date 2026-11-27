@@ -1,20 +1,23 @@
 use std::fs::{self, File, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 use koma_ipc::protocol::{IpcCommand, IpcRequest, WorkspaceCommand};
 use koma_ipc::transport::send_request;
+use koma_ipc::workspaces;
 
 pub const DEFAULT_PROFILE: &str = "default";
+const ACTIVATE_RETRY_ATTEMPTS: usize = 20;
+const ACTIVATE_RETRY_DELAY: Duration = Duration::from_millis(50);
 
 pub fn home() -> Option<String> {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .ok()
+    workspaces::home_dir().map(|p| p.to_string_lossy().into_owned())
 }
 
 pub fn root() -> Result<PathBuf, String> {
-    koma_ipc::workspaces::state_root()
+    workspaces::state_root()
 }
 
 fn profile_id(raw: &str) -> Result<String, String> {
@@ -51,7 +54,7 @@ pub struct Profile {
 impl Profile {
     fn paths(root: &Path, raw: &str) -> Result<Self, String> {
         let id = profile_id(raw)?;
-        let dir = root.join("profiles").join(&id);
+        let dir = workspaces::profile_dir(root, &id);
         Ok(Self { id, dir })
     }
 
@@ -68,7 +71,7 @@ impl Profile {
         if profile.id == DEFAULT_PROFILE {
             return Err("Profile already exists: Default".into());
         }
-        fs::create_dir_all(root.join("profiles")).map_err(|e| e.to_string())?;
+        fs::create_dir_all(workspaces::profiles_dir(root)).map_err(|e| e.to_string())?;
         fs::create_dir(&profile.dir).map_err(|e| {
             if e.kind() == io::ErrorKind::AlreadyExists {
                 format!("Profile already exists: {}", profile.id)
@@ -81,7 +84,7 @@ impl Profile {
 
     pub fn list(root: &Path) -> Result<Vec<String>, String> {
         let mut ids = vec![DEFAULT_PROFILE.into()];
-        match fs::read_dir(root.join("profiles")) {
+        match fs::read_dir(workspaces::profiles_dir(root)) {
             Ok(entries) => {
                 for entry in entries {
                     let entry = entry.map_err(|e| e.to_string())?;
@@ -104,21 +107,45 @@ impl Profile {
 
     pub fn try_lock(&self) -> Result<Option<File>, String> {
         fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
-        try_lock(&self.dir.join("instance.lock"))
+        try_lock(&workspaces::profile_lock_path(&self.dir))
     }
 
     pub fn activate(&self) -> Result<(), String> {
-        let socket = fs::read_to_string(self.dir.join("endpoint"))
-            .map_err(|e| format!("Profile {} has no ready IPC endpoint: {e}", self.id))?;
-        send_request(
-            &socket,
-            &IpcRequest::new(IpcCommand::Workspace(WorkspaceCommand::ProfileActivate {
-                id: self.id.clone(),
-            })),
-        )?
-        .into_result()?;
-        Ok(())
+        let endpoint_path = workspaces::profile_endpoint_path(&self.dir);
+        let request = IpcRequest::new(IpcCommand::Workspace(WorkspaceCommand::ProfileActivate {
+            id: self.id.clone(),
+        }));
+        retry_until_ready(ACTIVATE_RETRY_ATTEMPTS, ACTIVATE_RETRY_DELAY, || {
+            let socket = fs::read_to_string(&endpoint_path)
+                .map_err(|e| format!("Profile {} has no ready IPC endpoint: {e}", self.id))?;
+            let socket = socket.trim();
+            if socket.is_empty() {
+                return Err(format!("Profile {} has an empty IPC endpoint", self.id));
+            }
+            send_request(socket, &request)?.into_result()?;
+            Ok(())
+        })
     }
+}
+
+fn retry_until_ready<T, F>(attempts: usize, delay: Duration, mut op: F) -> Result<T, String>
+where
+    F: FnMut() -> Result<T, String>,
+{
+    let total = attempts.max(1);
+    let mut last_err = String::new();
+    for attempt in 0..total {
+        match op() {
+            Ok(val) => return Ok(val),
+            Err(err) => {
+                last_err = err;
+                if attempt + 1 < total && !delay.is_zero() {
+                    thread::sleep(delay);
+                }
+            }
+        }
+    }
+    Err(last_err)
 }
 
 pub fn try_lock(path: &Path) -> Result<Option<File>, String> {
@@ -173,5 +200,28 @@ mod tests {
         assert!(work.try_lock().unwrap().is_some());
         drop(default_lock);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retry_until_ready_handles_transient_startup_races() {
+        let mut calls = 0;
+        let ok = retry_until_ready(4, Duration::ZERO, || {
+            calls += 1;
+            if calls < 3 {
+                Err(format!("attempt {calls} failed"))
+            } else {
+                Ok("ready")
+            }
+        });
+        assert_eq!(ok, Ok("ready"));
+        assert_eq!(calls, 3);
+
+        let mut fail_calls = 0;
+        let err: Result<(), String> = retry_until_ready(3, Duration::ZERO, || {
+            fail_calls += 1;
+            Err(format!("err-{fail_calls}"))
+        });
+        assert_eq!(err, Err("err-3".into()));
+        assert_eq!(fail_calls, 3);
     }
 }

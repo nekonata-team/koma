@@ -5,7 +5,7 @@ use makepad_widgets::makepad_draw::DrawList2d;
 use makepad_widgets::*;
 
 use super::{
-    KomaSlot, SheetStrip, SheetStripAction, DEFAULT_OVERVIEW_SCALE, DRAG_THRESHOLD_PX,
+    CardDrawer, CardStyle, SheetStrip, SheetStripAction, DEFAULT_OVERVIEW_SCALE, DRAG_THRESHOLD_PX,
     OVERVIEW_RENDER_EPS,
 };
 
@@ -137,7 +137,7 @@ impl SheetStrip {
         viewport_h + SHEET_GAP
     }
 
-    pub(super) fn sheet_y_top(&self, sheet_idx: usize, viewport_h: f64) -> f64 {
+    pub(super) fn sheet_y_top(sheet_idx: usize, viewport_h: f64) -> f64 {
         sheet_idx as f64 * Self::sheet_row_step(viewport_h)
     }
 
@@ -146,7 +146,7 @@ impl SheetStrip {
         if self.mode != InputMode::Overview {
             let scroll_x = self.scroll_bars.get_scroll_pos().x;
             let cx_pos = scroll_x + vp.x * 0.5;
-            let cy_pos = self.sheet_y_top(self.active_sheet, vp.y) + vp.y * 0.5;
+            let cy_pos = Self::sheet_y_top(self.active_sheet, vp.y) + vp.y * 0.5;
             return (0.0, 1.0, cx_pos, cy_pos);
         }
 
@@ -160,11 +160,11 @@ impl SheetStrip {
         let active_sheet = self.sheets.get(self.active_sheet);
         let base_x = match active_sheet {
             Some(sheet) => {
-                let row_w = self.sheet_total_width(sheet);
+                let row_w = sheet.total_width(self.koma_gap);
                 if row_w <= vis_w - 80.0 {
                     row_w * 0.5
                 } else if let Some(bi) = sheet.komas.iter().position(|b| b.focused) {
-                    let (sx, ex) = self.koma_x_span(sheet, bi);
+                    let (sx, ex) = sheet.koma_x_span(bi, self.koma_gap);
                     (sx + ex) * 0.5
                 } else {
                     row_w * 0.5
@@ -177,7 +177,7 @@ impl SheetStrip {
         let base_y = if total_h <= vis_h - 80.0 {
             total_h * 0.5
         } else {
-            self.sheet_y_top(self.active_sheet, vp.y) + vp.y * 0.5
+            Self::sheet_y_top(self.active_sheet, vp.y) + vp.y * 0.5
         };
 
         (
@@ -209,7 +209,7 @@ impl SheetStrip {
         let sheet = &self.sheets[sheet_idx];
         let mut insert_idx = sheet.komas.len();
         for (bi, _) in sheet.komas.iter().enumerate() {
-            let (sx, ex) = self.koma_x_span(sheet, bi);
+            let (sx, ex) = sheet.koma_x_span(bi, self.koma_gap);
             let mid_x = (sx + ex) * 0.5;
             if world.x < mid_x {
                 insert_idx = bi;
@@ -270,21 +270,39 @@ impl SheetStrip {
         cx.push_clip_rect(local_clip);
 
         let card_h = (viewport.size.y - 2.0 * self.koma_gap).max(160.0);
-        let sheets = self.sheets.clone();
-        let active_drag = self.overview.drag.clone().filter(|d| d.active);
-        let hovered_id = self.overview.hovered_koma.clone();
+        let active_drop = self
+            .overview
+            .drag
+            .as_ref()
+            .filter(|d| d.active)
+            .and_then(|d| d.drop_target);
+        let hovered_id = self.overview.hovered_koma.as_ref();
+        let overview_t = self.overview.t;
+        let theme_colors = self.theme_colors;
+        let koma_gap = self.koma_gap;
+        let active_sheet = self.active_sheet;
+        let mut drawer = CardDrawer {
+            mode: self.mode,
+            theme_colors,
+            accent_color: self.draw_drop_bar.color,
+            koma_gap,
+            draw_border: &mut self.draw_border,
+            draw_header: &mut self.draw_header,
+            draw_title: &mut self.draw_title,
+            koma_widgets: &mut self.koma_widgets,
+        };
         let mut visible_web_ids = HashSet::new();
 
-        for (sheet_idx, sheet) in sheets.iter().enumerate() {
-            let sheet_y = self.sheet_y_top(sheet_idx, viewport.size.y);
+        for (sheet_idx, sheet) in self.sheets.iter().enumerate() {
+            let sheet_y = Self::sheet_y_top(sheet_idx, viewport.size.y);
             if sheet_y + viewport.size.y + SHEET_LABEL_OFFSET_Y < visible_world.pos.y
                 || sheet_y - SHEET_LABEL_OFFSET_Y > visible_world.pos.y + visible_world.size.y
             {
                 continue;
             }
 
-            let is_active_sheet = sheet_idx == self.active_sheet;
-            let row_w = self.sheet_total_width(sheet).max(viewport.size.x);
+            let is_active_sheet = sheet_idx == active_sheet;
+            let row_w = sheet.total_width(koma_gap).max(viewport.size.x);
             let sheet_world_rect = Rect {
                 pos: dvec2(0.0, sheet_y),
                 size: dvec2(row_w, viewport.size.y),
@@ -297,22 +315,22 @@ impl SheetStrip {
                 pos: dvec2(CANVAS_ORIGIN, CANVAS_ORIGIN + sheet_y),
                 size: dvec2(row_w, viewport.size.y),
             };
-            if is_active_sheet && self.overview.t > 0.05 {
+            if is_active_sheet && overview_t > 0.05 {
                 let frame = Rect {
                     pos: sheet_local_rect.pos - dvec2(4.0, 4.0),
                     size: sheet_local_rect.size + dvec2(8.0, 8.0),
                 };
-                self.draw_border.color = vec4(0.18, 0.36, 0.56, 1.0);
-                self.draw_border.draw_abs(cx, frame);
+                drawer.draw_border.color = theme_colors.overview_active_sheet_border;
+                drawer.draw_border.draw_abs(cx, frame);
             }
             self.draw_sheet_bg.color = if is_active_sheet {
-                vec4(0.08, 0.10, 0.16, 1.0)
+                theme_colors.overview_active_sheet_bg
             } else {
-                vec4(0.06, 0.08, 0.12, 1.0)
+                theme_colors.overview_inactive_sheet_bg
             };
             self.draw_sheet_bg.draw_abs(cx, sheet_local_rect);
 
-            if self.overview.t > 0.05 {
+            if overview_t > 0.05 {
                 let label_pos = dvec2(
                     CANVAS_ORIGIN + 6.0,
                     CANVAS_ORIGIN + sheet_y - SHEET_LABEL_OFFSET_Y,
@@ -331,14 +349,14 @@ impl SheetStrip {
             }
 
             for (bi, slot) in sheet.komas.iter().enumerate() {
-                let (bx, _) = self.koma_x_span(sheet, bi);
+                let (bx, _) = sheet.koma_x_span(bi, koma_gap);
                 if bx + slot.width < visible_world.pos.x
                     || bx > visible_world.pos.x + visible_world.size.x
                 {
                     continue;
                 }
                 let card_local_rect = Rect {
-                    pos: dvec2(CANVAS_ORIGIN + bx, CANVAS_ORIGIN + sheet_y + self.koma_gap),
+                    pos: dvec2(CANVAS_ORIGIN + bx, CANVAS_ORIGIN + sheet_y + koma_gap),
                     size: dvec2(slot.width, card_h),
                 };
                 let card_clip = intersect_rect(
@@ -352,19 +370,18 @@ impl SheetStrip {
                     cx.push_clip_rect(card_clip);
                     let card_walk =
                         Walk::fixed(slot.width, card_h).with_abs_pos(card_local_rect.pos);
-                    let is_hovered = hovered_id.as_ref() == Some(&slot.koma_id);
+                    let is_hovered = hovered_id == Some(&slot.koma_id);
                     let is_selected = is_active_sheet && slot.focused;
-                    let selected_or_hovered = KomaSlot {
-                        focused: is_selected,
-                        ..slot.clone()
-                    };
-                    let _ = self.draw_card(
+                    let _ = drawer.draw_card(
                         cx,
                         scope,
-                        &selected_or_hovered,
+                        slot,
                         card_walk,
-                        self.overview.t > 0.05,
-                        is_hovered,
+                        CardStyle {
+                            focused: is_selected,
+                            highlight_glow: overview_t > 0.05,
+                            hovered: is_hovered,
+                        },
                     );
                     if slot.kind == KomaKind::Web {
                         visible_web_ids.insert(&slot.koma_id);
@@ -375,25 +392,23 @@ impl SheetStrip {
                     sheet_idx,
                     koma_id: slot.koma_id.clone(),
                     world_rect: Rect {
-                        pos: dvec2(bx, sheet_y + self.koma_gap),
+                        pos: dvec2(bx, sheet_y + koma_gap),
                         size: dvec2(slot.width, card_h),
                     },
                 });
             }
 
-            if let Some(drag) = &active_drag {
-                if let Some((td, ti)) = drag.drop_target {
-                    if td == sheet_idx {
-                        let gap_x = self.sheet_gap_x(sheet, ti);
-                        let bar_rect = Rect {
-                            pos: dvec2(
-                                CANVAS_ORIGIN + gap_x - 3.0,
-                                CANVAS_ORIGIN + sheet_y + self.koma_gap - 6.0,
-                            ),
-                            size: dvec2(6.0, card_h + 12.0),
-                        };
-                        self.draw_drop_bar.draw_abs(cx, bar_rect);
-                    }
+            if let Some((td, ti)) = active_drop {
+                if td == sheet_idx {
+                    let gap_x = sheet.gap_x(ti, koma_gap);
+                    let bar_rect = Rect {
+                        pos: dvec2(
+                            CANVAS_ORIGIN + gap_x - 3.0,
+                            CANVAS_ORIGIN + sheet_y + koma_gap - 6.0,
+                        ),
+                        size: dvec2(6.0, card_h + 12.0),
+                    };
+                    self.draw_drop_bar.draw_abs(cx, bar_rect);
                 }
             }
         }
@@ -404,7 +419,7 @@ impl SheetStrip {
 
         if let Some(rt) = &self.shared_web_runtime {
             let mut rt = rt.borrow_mut();
-            for sheet in &sheets {
+            for sheet in &self.sheets {
                 for slot in &sheet.komas {
                     if slot.kind == KomaKind::Web {
                         rt.set_koma_hidden(

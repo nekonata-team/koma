@@ -5,15 +5,19 @@ use std::time::Duration;
 
 use koma_ipc::protocol::{IpcCommand, IpcPayload, IpcRequest, WorkspaceCommand, WorkspaceEndpoint};
 use koma_ipc::transport::send_request_with_timeout;
-use koma_ipc::workspaces::{state_root, PRIVATE_ENDPOINTS};
+use koma_ipc::workspaces::{
+    private_endpoints_dir, profile_endpoint_path, profiles_dir, state_root,
+};
 use makepad_micro_serde::SerJson;
 
 pub(super) fn list(json: bool) -> Result<(), String> {
     let root = state_root()?;
     let mut workspaces = Vec::new();
     let request = IpcRequest::new(IpcCommand::Workspace(WorkspaceCommand::Inspect));
-    for (directory, is_private) in [("profiles", false), (PRIVATE_ENDPOINTS, true)] {
-        let dir = root.join(directory);
+    for (dir, is_private) in [
+        (profiles_dir(&root), false),
+        (private_endpoints_dir(&root), true),
+    ] {
         let entries = match fs::read_dir(&dir) {
             Ok(entries) => entries,
             Err(err) if err.kind() == ErrorKind::NotFound => continue,
@@ -25,7 +29,7 @@ pub(super) fn list(json: bool) -> Result<(), String> {
             let marker = if is_private {
                 path.clone()
             } else {
-                path.join("endpoint")
+                profile_endpoint_path(&path)
             };
             if let Some(workspace) = inspect(&marker, &request).filter(|workspace| {
                 workspace.is_private == is_private

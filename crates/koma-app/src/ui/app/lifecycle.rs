@@ -171,7 +171,7 @@ impl App {
                 startup_error(format!("Could not publish {}: {err}", endpoint.display()));
             }
             let browser_dir = profile.dir.join("browser");
-            self.load_site_permissions(&profile.dir);
+            self.web_dialogs.load_site_permissions(&profile.dir);
             self.state_dir = Some(profile.dir);
             browser_dir
         } else {

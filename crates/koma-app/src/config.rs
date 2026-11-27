@@ -176,180 +176,253 @@ fn require_non_empty_str(
     Ok(val.to_string())
 }
 
+/// Deep-merges `overlay` into `base`: nested tables are merged recursively,
+/// while all other values in `overlay` replace the corresponding entry in `base`.
+pub fn merge_tables(base: &mut toml::Table, overlay: toml::Table) {
+    for (key, value) in overlay {
+        match (base.get_mut(&key), value) {
+            (Some(toml::Value::Table(base_tbl)), toml::Value::Table(overlay_tbl)) => {
+                merge_tables(base_tbl, overlay_tbl);
+            }
+            (_, val) => {
+                base.insert(key, val);
+            }
+        }
+    }
+}
+
+fn parse_number(value: &toml::Value) -> Option<f64> {
+    value
+        .as_float()
+        .or_else(|| value.as_integer().map(|i| i as f64))
+}
+
 impl Config {
+    pub fn parse_table(text: &str) -> Result<toml::Table, String> {
+        text.parse().map_err(|e| format!("Invalid TOML: {e}"))
+    }
+
     pub fn parse(text: &str) -> Result<Self, String> {
-        let table: toml::Table = text.parse().map_err(|e| format!("Invalid TOML: {e}"))?;
+        let table = Self::parse_table(text)?;
+        Self::from_table(&table)
+    }
+
+    pub fn from_table(table: &toml::Table) -> Result<Self, String> {
         let mut config = Self::default();
-        if let Some(layout) = table.get("layout") {
-            let layout = layout.as_table().ok_or("[layout] must be a table")?;
-            if let Some(value) = layout.get("width_presets") {
-                let list = value
-                    .as_array()
-                    .ok_or("layout.width_presets must be an array")?;
-                let presets: Vec<f64> = list
-                    .iter()
-                    .map(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-                    .collect::<Option<_>>()
-                    .ok_or("layout.width_presets must contain numbers")?;
-                if presets.is_empty() || presets.iter().any(|p| !(*p > 0.0 && *p <= 1.0)) {
-                    return Err("layout.width_presets needs values in (0, 1]".into());
+        for (section, value) in table {
+            match section.as_str() {
+                "layout" => {
+                    let layout = value.as_table().ok_or("[layout] must be a table")?;
+                    for (key, val) in layout {
+                        match key.as_str() {
+                            "width_presets" => {
+                                let list = val
+                                    .as_array()
+                                    .ok_or("layout.width_presets must be an array")?;
+                                let presets: Vec<f64> = list
+                                    .iter()
+                                    .map(parse_number)
+                                    .collect::<Option<_>>()
+                                    .ok_or("layout.width_presets must contain numbers")?;
+                                if presets.is_empty()
+                                    || presets
+                                        .iter()
+                                        .any(|p| !(p.is_finite() && *p > 0.0 && *p <= 1.0))
+                                {
+                                    return Err(
+                                        "layout.width_presets needs values in (0, 1]".into()
+                                    );
+                                }
+                                config.width_presets = presets;
+                            }
+                            "width_step" => {
+                                let step = parse_number(val)
+                                    .filter(|s| s.is_finite() && *s > 0.0)
+                                    .ok_or("layout.width_step must be a positive number")?;
+                                config.width_step = step;
+                            }
+                            "gap" => {
+                                let gap = parse_number(val)
+                                    .filter(|g| g.is_finite() && *g >= 0.0)
+                                    .ok_or("layout.gap must be a non-negative number")?;
+                                config.koma_gap = gap;
+                            }
+                            "center_focused" => {
+                                let raw = val
+                                    .as_str()
+                                    .ok_or("layout.center_focused must be a string")?;
+                                config.center_focused = CenterFocused::parse(raw)?;
+                            }
+                            other => return Err(format!("Unknown layout.{other} key")),
+                        }
+                    }
                 }
-                config.width_presets = presets;
-            }
-            if let Some(value) = layout.get("width_step") {
-                let step = value
-                    .as_float()
-                    .or_else(|| value.as_integer().map(|i| i as f64))
-                    .filter(|s| *s > 0.0)
-                    .ok_or("layout.width_step must be a positive number")?;
-                config.width_step = step;
-            }
-            if let Some(value) = layout.get("gap") {
-                let gap = value
-                    .as_float()
-                    .or_else(|| value.as_integer().map(|i| i as f64))
-                    .filter(|g| g.is_finite() && *g >= 0.0)
-                    .ok_or("layout.gap must be a non-negative number")?;
-                config.koma_gap = gap;
-            }
-            if let Some(value) = layout.get("center_focused") {
-                let raw = value
-                    .as_str()
-                    .ok_or("layout.center_focused must be a string")?;
-                config.center_focused = CenterFocused::parse(raw)?;
-            }
-        }
-        if let Some(aliases) = table.get("aliases") {
-            let tbl = aliases.as_table().ok_or("[aliases] must be a table")?;
-            for (key, value) in tbl {
-                let name = key.trim();
-                if name.is_empty() || name.chars().any(char::is_whitespace) {
-                    return Err(format!("aliases.{key} must not be empty or contain spaces"));
+                "aliases" => {
+                    let tbl = value.as_table().ok_or("[aliases] must be a table")?;
+                    for (key, val) in tbl {
+                        let name = key.trim();
+                        if name.is_empty() || name.chars().any(char::is_whitespace) {
+                            return Err(format!(
+                                "aliases.{key} must not be empty or contain spaces"
+                            ));
+                        }
+                        if name == "terminal" || name == "term" {
+                            return Err(format!("aliases.{name} is reserved"));
+                        }
+                        let target = val
+                            .as_str()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .ok_or_else(|| format!("aliases.{name} must be a non-empty string"))?;
+                        config.aliases.insert(name.to_string(), target.to_string());
+                    }
                 }
-                if name == "terminal" || name == "term" {
-                    return Err(format!("aliases.{name} is reserved"));
+                "sheet_presets" => {
+                    let list = value
+                        .as_array()
+                        .ok_or("[[sheet_presets]] must be an array of tables")?;
+                    for (i, item) in list.iter().enumerate() {
+                        let tbl = item
+                            .as_table()
+                            .ok_or_else(|| format!("sheet_presets[{i}] must be a table"))?;
+                        for key in tbl.keys() {
+                            if !matches!(key.as_str(), "name" | "komas") {
+                                return Err(format!("Unknown sheet_presets[{i}].{key} key"));
+                            }
+                        }
+                        let name =
+                            require_non_empty_str(tbl, &format!("sheet_presets[{i}]"), "name")?;
+                        let komas_val = tbl
+                            .get("komas")
+                            .and_then(|v| v.as_array())
+                            .ok_or_else(|| format!("sheet_presets[{i}].komas must be an array"))?;
+                        let mut komas = Vec::with_capacity(komas_val.len());
+                        for (j, b) in komas_val.iter().enumerate() {
+                            let s = b
+                                .as_str()
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                                .ok_or_else(|| {
+                                    format!(
+                                        "sheet_presets[{i}].komas[{j}] must be a non-empty string"
+                                    )
+                                })?;
+                            komas.push(s.to_string());
+                        }
+                        if komas.is_empty() {
+                            return Err(format!("sheet_presets[{i}].komas must not be empty"));
+                        }
+                        config.sheet_presets.push(SheetPresetConfig { name, komas });
+                    }
                 }
-                let target = value
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .ok_or_else(|| format!("aliases.{name} must be a non-empty string"))?;
-                config.aliases.insert(name.to_string(), target.to_string());
-            }
-        }
-        if let Some(presets) = table.get("sheet_presets") {
-            let list = presets
-                .as_array()
-                .ok_or("[[sheet_presets]] must be an array of tables")?;
-            for (i, item) in list.iter().enumerate() {
-                let tbl = item
-                    .as_table()
-                    .ok_or_else(|| format!("sheet_presets[{i}] must be a table"))?;
-                let name = require_non_empty_str(tbl, &format!("sheet_presets[{i}]"), "name")?;
-                let komas_val = tbl
-                    .get("komas")
-                    .and_then(|v| v.as_array())
-                    .ok_or_else(|| format!("sheet_presets[{i}].komas must be an array"))?;
-                let mut komas = Vec::with_capacity(komas_val.len());
-                for (j, b) in komas_val.iter().enumerate() {
-                    let s = b
-                        .as_str()
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .ok_or_else(|| {
-                            format!("sheet_presets[{i}].komas[{j}] must be a non-empty string")
-                        })?;
-                    komas.push(s.to_string());
+                "web" => {
+                    let web = value.as_table().ok_or("[web] must be a table")?;
+                    for (key, val) in web {
+                        match key.as_str() {
+                            "search_engine" => {
+                                let raw =
+                                    val.as_str().ok_or("web.search_engine must be a string")?;
+                                config.search_engine = SearchEngine::parse(raw)?;
+                            }
+                            other => return Err(format!("Unknown web.{other} key")),
+                        }
+                    }
                 }
-                if komas.is_empty() {
-                    return Err(format!("sheet_presets[{i}].komas must not be empty"));
+                "terminal" => {
+                    let terminal = value.as_table().ok_or("[terminal] must be a table")?;
+                    for (key, val) in terminal {
+                        match key.as_str() {
+                            "shell" => {
+                                let shell = val
+                                    .as_str()
+                                    .map(str::trim)
+                                    .filter(|s| !s.is_empty())
+                                    .ok_or("terminal.shell must be a non-empty string")?;
+                                config.terminal.shell = Some(shell.to_string());
+                            }
+                            "session_prefixes" => {
+                                let list = val
+                                    .as_array()
+                                    .ok_or("terminal.session_prefixes must be an array")?;
+                                for (i, item) in list.iter().enumerate() {
+                                    let prefix = item
+                                        .as_str()
+                                        .filter(|s| !s.trim().is_empty())
+                                        .ok_or_else(|| {
+                                            format!(
+                                                "terminal.session_prefixes[{i}] must be a non-empty string"
+                                            )
+                                        })?;
+                                    config.terminal.session_prefixes.push(prefix.to_string());
+                                }
+                            }
+                            "session_list_command" => {
+                                let cmd = val
+                                    .as_str()
+                                    .map(str::trim)
+                                    .filter(|s| !s.is_empty())
+                                    .ok_or(
+                                        "terminal.session_list_command must be a non-empty string",
+                                    )?;
+                                config.terminal.session_list_command = Some(cmd.to_string());
+                            }
+                            other => return Err(format!("Unknown terminal.{other} key")),
+                        }
+                    }
                 }
-                config.sheet_presets.push(SheetPresetConfig { name, komas });
-            }
-        }
-        if let Some(web) = table.get("web") {
-            let web = web.as_table().ok_or("[web] must be a table")?;
-            if let Some(value) = web.get("search_engine") {
-                let raw = value.as_str().ok_or("web.search_engine must be a string")?;
-                config.search_engine = SearchEngine::parse(raw)?;
-            }
-        }
-        if let Some(terminal) = table.get("terminal") {
-            let terminal = terminal.as_table().ok_or("[terminal] must be a table")?;
-            if let Some(value) = terminal.get("shell") {
-                let shell = value
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .ok_or("terminal.shell must be a non-empty string")?;
-                config.terminal.shell = Some(shell.to_string());
-            }
-            if let Some(value) = terminal.get("session_prefixes") {
-                let list = value
-                    .as_array()
-                    .ok_or("terminal.session_prefixes must be an array")?;
-                for (i, item) in list.iter().enumerate() {
-                    let prefix =
-                        item.as_str()
-                            .filter(|s| !s.trim().is_empty())
-                            .ok_or_else(|| {
-                                format!("terminal.session_prefixes[{i}] must be a non-empty string")
+                "scale" => {
+                    let tbl = value.as_table().ok_or("[scale] must be a table")?;
+                    for (key, val) in tbl {
+                        match key.as_str() {
+                            "web" => config.scale.web = parse_scale(val, key)?,
+                            "terminal" => config.scale.terminal = parse_scale(val, key)?,
+                            other => return Err(format!("Unknown scale.{other} key")),
+                        }
+                    }
+                }
+                "theme" => {
+                    let tbl = value.as_table().ok_or("[theme] must be a table")?;
+                    for (key, val) in tbl {
+                        match key.as_str() {
+                            "appearance" => {
+                                let raw = val
+                                    .as_str()
+                                    .ok_or_else(|| format!("theme.{key} must be a string"))?;
+                                config.theme.appearance = ThemeAppearance::parse(raw)?;
+                            }
+                            "accent" => {
+                                let raw = val
+                                    .as_str()
+                                    .ok_or_else(|| format!("theme.{key} must be a string"))?;
+                                config.theme.accent = Some(parse_hex_color(raw, key)?);
+                            }
+                            other => return Err(format!("Unknown theme.{other} key")),
+                        }
+                    }
+                }
+                "keybindings" => {
+                    let tbl = value.as_table().ok_or("[keybindings] must be a table")?;
+                    for (scope, val) in tbl {
+                        let target = match scope.as_str() {
+                            "global" => &mut config.keybindings.global,
+                            "koma" => &mut config.keybindings.koma,
+                            "overview" => &mut config.keybindings.overview,
+                            other => return Err(format!("Unknown [keybindings.{other}] scope")),
+                        };
+                        let scope_tbl = val
+                            .as_table()
+                            .ok_or_else(|| format!("[keybindings.{scope}] must be a table"))?;
+                        for (key_spec, action_val) in scope_tbl {
+                            let stroke = parse_key_stroke(key_spec)?;
+                            let action_str = action_val.as_str().ok_or_else(|| {
+                                format!("keybindings.{scope}.{key_spec} must be a string")
                             })?;
-                    config.terminal.session_prefixes.push(prefix.to_string());
+                            let action = parse_action(action_str)?;
+                            target.insert(stroke, action);
+                        }
+                    }
                 }
-            }
-            if let Some(value) = terminal.get("session_list_command") {
-                let cmd = value
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .ok_or("terminal.session_list_command must be a non-empty string")?;
-                config.terminal.session_list_command = Some(cmd.to_string());
-            }
-        }
-        if let Some(scale) = table.get("scale") {
-            let tbl = scale.as_table().ok_or("[scale] must be a table")?;
-            for (key, value) in tbl {
-                match key.as_str() {
-                    "web" => config.scale.web = parse_scale(value, key)?,
-                    "terminal" => config.scale.terminal = parse_scale(value, key)?,
-                    other => return Err(format!("Unknown scale.{other} key")),
-                }
-            }
-        }
-        if let Some(theme) = table.get("theme") {
-            let tbl = theme.as_table().ok_or("[theme] must be a table")?;
-            for (key, value) in tbl {
-                let raw = value
-                    .as_str()
-                    .ok_or_else(|| format!("theme.{key} must be a string"))?;
-                match key.as_str() {
-                    "appearance" => config.theme.appearance = ThemeAppearance::parse(raw)?,
-                    "accent" => config.theme.accent = Some(parse_hex_color(raw, key)?),
-                    other => return Err(format!("Unknown theme.{other} key")),
-                }
-            }
-        }
-        if let Some(kb) = table.get("keybindings") {
-            let tbl = kb.as_table().ok_or("[keybindings] must be a table")?;
-            for (scope, value) in tbl {
-                let target = match scope.as_str() {
-                    "global" => &mut config.keybindings.global,
-                    "koma" => &mut config.keybindings.koma,
-                    "overview" => &mut config.keybindings.overview,
-                    other => return Err(format!("Unknown [keybindings.{other}] scope")),
-                };
-                let scope_tbl = value
-                    .as_table()
-                    .ok_or_else(|| format!("[keybindings.{scope}] must be a table"))?;
-                for (key_spec, action_val) in scope_tbl {
-                    let stroke = parse_key_stroke(key_spec)?;
-                    let action_str = action_val.as_str().ok_or_else(|| {
-                        format!("keybindings.{scope}.{key_spec} must be a string")
-                    })?;
-                    let action = parse_action(action_str)?;
-                    target.insert(stroke, action);
-                }
+                other => return Err(format!("Unknown config key '{other}'")),
             }
         }
         Ok(config)
@@ -402,12 +475,20 @@ impl Config {
     }
 }
 
-/// `$KOMA_CONFIG`, else `~/.config/koma/config.toml`.
+/// `$KOMA_CONFIG`, else `$XDG_CONFIG_HOME/koma/config.toml`, else `~/.config/koma/config.toml`.
 pub fn config_path(home: Option<&str>) -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("KOMA_CONFIG").filter(|p| !p.is_empty()) {
-        return Some(PathBuf::from(path));
+    match home {
+        Some(h) => {
+            let koma_config = std::env::var("KOMA_CONFIG").ok();
+            let xdg_config_home = std::env::var("XDG_CONFIG_HOME").ok();
+            koma_ipc::workspaces::resolve_config_path(
+                koma_config.as_deref(),
+                xdg_config_home.as_deref(),
+                Some(Path::new(h)),
+            )
+        }
+        None => koma_ipc::workspaces::config_path(),
     }
-    home.map(|h| Path::new(h).join(".config/koma/config.toml"))
 }
 
 #[cfg(test)]
@@ -605,5 +686,57 @@ accent = "#112233cc"
         assert!(Config::parse("[scale]\nweb = \"0.9\"").is_err());
         assert!(Config::parse("[scale]\nunknown = 1.0").is_err());
         assert!(Config::parse("scale = 1.0").is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_keys_and_non_finite_floats() {
+        assert!(Config::parse("unknown_section = 1").is_err());
+        assert!(Config::parse("[unknown]\na = 1").is_err());
+        assert!(Config::parse("[layout]\nunknown = 1").is_err());
+        assert!(Config::parse("[web]\nunknown = \"x\"").is_err());
+        assert!(Config::parse("[terminal]\nunknown = \"x\"").is_err());
+        assert!(Config::parse(
+            "[[sheet_presets]]\nname = \"Dev\"\nkomas = [\":terminal\"]\nextra = true"
+        )
+        .is_err());
+        assert!(Config::parse("[theme]\nunknown = 123").is_err());
+
+        assert!(Config::parse("[layout]\nwidth_step = inf").is_err());
+        assert!(Config::parse("[layout]\nwidth_step = nan").is_err());
+        assert!(Config::parse("[layout]\ngap = inf").is_err());
+        assert!(Config::parse("[layout]\nwidth_presets = [nan]").is_err());
+        assert!(Config::parse("[scale]\nweb = inf").is_err());
+    }
+
+    #[test]
+    fn merges_raw_tables_before_typed_validation() {
+        let mut base = Config::parse_table(
+            r#"
+[layout]
+width_step = 40
+gap = 12
+
+[terminal]
+shell = "zsh"
+"#,
+        )
+        .unwrap();
+        let overlay = Config::parse_table(
+            r#"
+[layout]
+gap = 20
+
+[web]
+search_engine = "brave"
+"#,
+        )
+        .unwrap();
+
+        merge_tables(&mut base, overlay);
+        let cfg = Config::from_table(&base).unwrap();
+        assert_eq!(cfg.width_step, 40.0);
+        assert_eq!(cfg.koma_gap, 20.0);
+        assert_eq!(cfg.terminal.shell.as_deref(), Some("zsh"));
+        assert_eq!(cfg.search_engine, SearchEngine::Brave);
     }
 }

@@ -8,13 +8,12 @@ use makepad_app_terminal::widget::MpTermAction;
 use makepad_widgets::makepad_platform::file_dialogs::FileDialogAction;
 use makepad_widgets::*;
 
+use crate::runtime::platform;
 use crate::runtime::web_views::KomaApiEvent;
 use crate::ui::overlay_list::{self, OverlayListWidgetRefExt};
 use crate::ui::sheet_strip::{self, SheetStripAction};
 use crate::ui::web_koma::{self, WebKomaAction};
 
-#[cfg(target_os = "macos")]
-use super::default_browser;
 use super::lifecycle;
 use super::web_dialogs::WebModalRequest;
 use super::{App, PromptMode};
@@ -39,31 +38,25 @@ fn sync_handled_key_down(
     false
 }
 
-fn open_external_app_url(url: &str) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    let mut cmd = {
-        let mut c = std::process::Command::new("open");
-        c.arg(url);
-        c
-    };
-    #[cfg(target_os = "linux")]
-    let mut cmd = {
-        let mut c = std::process::Command::new("xdg-open");
-        c.arg(url);
-        c
-    };
-    #[cfg(target_os = "windows")]
-    let mut cmd = {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", "start", "", url]);
-        c
-    };
-    cmd.spawn()
-        .map(|_| ())
-        .map_err(|err| format!("Failed to open external URL {url}: {err}"))
-}
-
 impl App {
+    fn resolve_web_modal(&mut self, cx: &mut Cx, accepted: bool) {
+        let web_runtime = self
+            .web_runtime
+            .as_ref()
+            .expect("Web runtime is initialized");
+        let still_active = self.web_dialogs.resolve_active_modal(
+            cx,
+            &self.ui,
+            web_runtime,
+            self.state_dir.as_deref(),
+            self.is_private,
+            accepted,
+        );
+        if !still_active {
+            self.apply_focus(cx);
+        }
+    }
+
     fn handle_dialog_actions(&mut self, cx: &mut Cx, actions: &Actions) {
         let close_dialog = self.ui.dialog(cx, ids!(close_sheet_dialog));
         if close_dialog.confirmed(actions) {
@@ -76,26 +69,24 @@ impl App {
 
         let web_modal = self.ui.dialog(cx, ids!(web_modal_dialog));
         if web_modal.confirmed(actions) {
-            self.resolve_active_web_modal(cx, true);
+            self.resolve_web_modal(cx, true);
         } else if web_modal.cancelled(actions) || web_modal.dismissed(actions) {
-            self.resolve_active_web_modal(cx, false);
-        } else if self.active_web_modal.is_some()
+            self.resolve_web_modal(cx, false);
+        } else if self.web_dialogs.has_active_modal()
             && (self
                 .ui
                 .text_input(cx, ids!(web_modal_password))
                 .returned(actions)
                 .is_some()
-                || (matches!(
-                    self.active_web_modal,
-                    Some(WebModalRequest::JsDialog { .. })
-                ) && self
-                    .ui
-                    .text_input(cx, ids!(web_modal_input))
-                    .returned(actions)
-                    .is_some()))
+                || (self.web_dialogs.active_modal_is_js_dialog()
+                    && self
+                        .ui
+                        .text_input(cx, ids!(web_modal_input))
+                        .returned(actions)
+                        .is_some()))
         {
             web_modal.close(cx);
-            self.resolve_active_web_modal(cx, true);
+            self.resolve_web_modal(cx, true);
         }
     }
 
@@ -299,31 +290,33 @@ impl App {
     }
 
     fn pump_web_runtime(&mut self, cx: &mut Cx, event: &Event) {
-        let rt_changed = self.web_runtime().borrow_mut().pump_event(cx, event);
-        let popups = self.web_runtime().borrow_mut().take_popup_urls();
-        for popup_url in popups {
+        let (rt_changed, events) = {
+            let mut rt = self.web_runtime().borrow_mut();
+            (rt.pump_event(cx, event), rt.drain_events())
+        };
+        for popup_url in events.popups {
             let _ = self.create_web_koma(cx, popup_url, None);
         }
-        let popup_views = self.web_runtime().borrow_mut().take_popup_views();
-        for (view_id, url) in popup_views {
+        for (view_id, url) in events.popup_views {
             let _ = self.create_web_koma_with_view(cx, view_id, url);
         }
-        let external_urls = self.web_runtime().borrow_mut().take_external_urls();
-        for external_url in external_urls {
-            if let Err(err) = open_external_app_url(&external_url) {
+        for external_url in events.external_urls {
+            if let Err(err) = platform::open_external_app_url(&external_url) {
                 self.show_toast(cx, err);
             }
         }
-        let file_dialogs = self.web_runtime().borrow_mut().take_file_dialogs();
-        for (view_id, req) in file_dialogs {
-            self.open_web_file_dialog(cx, view_id, req);
+        for (view_id, req) in events.file_dialogs {
+            let web_runtime = self
+                .web_runtime
+                .as_ref()
+                .expect("Web runtime is initialized");
+            self.web_dialogs
+                .open_file_dialog(cx, web_runtime, view_id, req);
         }
-        let download_requests = self.web_runtime().borrow_mut().take_download_requests();
-        for (view_id, req) in download_requests {
-            self.open_web_download_dialog(cx, view_id, req);
+        for (view_id, req) in events.download_requests {
+            self.web_dialogs.open_download_dialog(cx, view_id, req);
         }
-        let download_updates = self.web_runtime().borrow_mut().take_download_updates();
-        for upd in download_updates {
+        for upd in events.download_updates {
             let toast_id = LiveId::from_str(&format!("download-{}", upd.download_id));
             let toast = if upd.state == 0 {
                 let title = if upd.percent < 0 {
@@ -346,17 +339,22 @@ impl App {
             };
             self.ui.toaster(cx, ids!(toaster)).show(cx, toast);
         }
-        let js_dialogs = self.web_runtime().borrow_mut().take_js_dialogs();
-        for (view_id, req) in js_dialogs {
-            self.enqueue_web_modal(cx, WebModalRequest::JsDialog { view_id, req });
+        for (view_id, req) in events.js_dialogs {
+            self.web_dialogs.enqueue_modal(
+                cx,
+                &self.ui,
+                WebModalRequest::JsDialog { view_id, req },
+            );
         }
-        let auth_requests = self.web_runtime().borrow_mut().take_auth_requests();
-        for (view_id, req) in auth_requests {
-            self.enqueue_web_modal(cx, WebModalRequest::Auth { view_id, req });
+        for (view_id, req) in events.auth_requests {
+            self.web_dialogs
+                .enqueue_modal(cx, &self.ui, WebModalRequest::Auth { view_id, req });
         }
-        let permission_requests = self.web_runtime().borrow_mut().take_permission_requests();
-        for (view_id, req) in permission_requests {
-            if let Some(granted) = self.check_site_permission(&req.origin, req.permissions) {
+        for (view_id, req) in events.permission_requests {
+            if let Some(granted) = self
+                .web_dialogs
+                .check_site_permission(&req.origin, req.permissions)
+            {
                 self.web_runtime().borrow_mut().resolve_permission_request(
                     cx,
                     view_id,
@@ -364,16 +362,18 @@ impl App {
                     granted,
                 );
             } else {
-                self.enqueue_web_modal(cx, WebModalRequest::Permission { view_id, req });
+                self.web_dialogs.enqueue_modal(
+                    cx,
+                    &self.ui,
+                    WebModalRequest::Permission { view_id, req },
+                );
             }
         }
-        let closed_komas = self.web_runtime().borrow_mut().take_closed_komas();
-        for koma_id in closed_komas {
+        for koma_id in events.closed_komas {
             let _ = self.close_koma_by_id(cx, &koma_id, false);
         }
-        let url_changes = self.web_runtime().borrow_mut().take_url_changes();
         let mut url_state_changed = false;
-        for (koma_id, url) in url_changes {
+        for (koma_id, url) in events.url_changes {
             let label = koma_core::input::derive_url_label(&url);
             if self.state.update_koma_url(&koma_id, url, Some(label)) {
                 url_state_changed = true;
@@ -384,9 +384,8 @@ impl App {
             self.sync_strip(cx, false);
             self.update_status(cx);
         }
-        let notifications = self.web_runtime().borrow_mut().take_web_notifications();
         let mut newest = None;
-        for notification in notifications {
+        for notification in events.web_notifications {
             if self.state.koma_by_id(&notification.koma_id).is_some() {
                 newest = Some(self.state.push_notification(
                     notification.koma_id,
@@ -408,8 +407,7 @@ impl App {
                 self.show_notification_toast(cx, &newest);
             }
         }
-        let koma_api_events = self.web_runtime().borrow_mut().take_koma_api_events();
-        for ev in koma_api_events {
+        for ev in events.koma_api {
             match ev {
                 KomaApiEvent::FocusKoma { target_koma_id, .. } => {
                     if self.state.focus_koma_by_id(&target_koma_id) {
@@ -422,8 +420,7 @@ impl App {
                 }
             }
         }
-        let web_nav_events = self.web_runtime().borrow_mut().take_web_nav_events();
-        for ev in web_nav_events {
+        for ev in events.web_nav {
             match ev.action.as_str() {
                 "openKoma" => {
                     if let Some(url) = ev.url {
@@ -526,7 +523,12 @@ impl MatchEvent for App {
         let mut terminal_metadata_changed = false;
         for action in actions {
             if let Some(file_action) = action.downcast_ref::<FileDialogAction>() {
-                self.handle_web_file_dialog_action(cx, file_action);
+                let web_runtime = self
+                    .web_runtime
+                    .as_ref()
+                    .expect("Web runtime is initialized");
+                self.web_dialogs
+                    .handle_file_dialog_action(cx, web_runtime, file_action);
                 continue;
             }
             if let Some(error) = action.downcast_ref::<lifecycle::ProfileOpenError>() {
@@ -534,7 +536,9 @@ impl MatchEvent for App {
                 continue;
             }
             #[cfg(target_os = "macos")]
-            if let Some(status) = action.downcast_ref::<default_browser::DefaultBrowserStatus>() {
+            if let Some(status) =
+                action.downcast_ref::<platform::default_browser::DefaultBrowserStatus>()
+            {
                 self.show_toast(cx, status.0.clone());
                 continue;
             }

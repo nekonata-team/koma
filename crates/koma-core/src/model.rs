@@ -83,6 +83,53 @@ pub struct NotificationEntry {
 }
 
 impl KomaMeta {
+    pub fn new_web(
+        id: KomaId,
+        sheet_id: Option<SheetId>,
+        profile_id: String,
+        label: String,
+        initial_url: Option<String>,
+    ) -> Self {
+        Self {
+            id,
+            sheet_id,
+            profile_id,
+            kind: KomaKind::Web,
+            label,
+            initial_url,
+            cwd: None,
+            command: None,
+            width: DEFAULT_KOMA_WIDTH,
+            ratio: None,
+            restore: None,
+            koma_api_enabled: false,
+        }
+    }
+
+    pub fn new_terminal(
+        id: KomaId,
+        sheet_id: Option<SheetId>,
+        profile_id: String,
+        label: String,
+        cwd: Option<String>,
+        command: Option<String>,
+    ) -> Self {
+        Self {
+            id,
+            sheet_id,
+            profile_id,
+            kind: KomaKind::Terminal,
+            label,
+            initial_url: None,
+            cwd,
+            command,
+            width: DEFAULT_KOMA_WIDTH,
+            ratio: None,
+            restore: None,
+            koma_api_enabled: false,
+        }
+    }
+
     /// Niri-style proportion: `n` equal komas plus gaps exactly fill `usable`.
     pub fn effective_width(&self, usable: f64, gap: f64) -> f64 {
         match self.ratio {
@@ -586,20 +633,24 @@ impl WorkspaceState {
         let profile_id = self.profile_id.clone();
         let sheet = &mut self.sheets[sheet_idx];
         let was_empty = sheet.komas.is_empty();
-        let koma = KomaMeta {
-            id: id.clone(),
-            sheet_id: Some(sheet.id.clone()),
-            profile_id,
-            kind,
-            label,
-            initial_url,
-            cwd,
-            command,
-            width,
-            ratio: None,
-            restore: None,
-            koma_api_enabled: false,
+        let mut koma = match kind {
+            KomaKind::Web => KomaMeta::new_web(
+                id.clone(),
+                Some(sheet.id.clone()),
+                profile_id,
+                label,
+                initial_url,
+            ),
+            KomaKind::Terminal => KomaMeta::new_terminal(
+                id.clone(),
+                Some(sheet.id.clone()),
+                profile_id,
+                label,
+                cwd,
+                command,
+            ),
         };
+        koma.width = width;
         sheet.komas.insert(insert_idx, koma.clone());
         if should_focus || was_empty {
             sheet.focused_koma_id = Some(id);
@@ -744,20 +795,14 @@ impl WorkspaceState {
         if with_default_terminal {
             let koma_id = self.allocate_koma_id();
             focused_koma_id = Some(koma_id.clone());
-            komas.push(KomaMeta {
-                id: koma_id,
-                sheet_id: Some(sheet_id.clone()),
-                profile_id: self.profile_id.clone(),
-                kind: KomaKind::Terminal,
-                label: "Shell".into(),
-                initial_url: None,
-                cwd: None,
-                command: None,
-                width: DEFAULT_KOMA_WIDTH,
-                ratio: None,
-                restore: None,
-                koma_api_enabled: false,
-            });
+            komas.push(KomaMeta::new_terminal(
+                koma_id,
+                Some(sheet_id.clone()),
+                self.profile_id.clone(),
+                "Shell".into(),
+                None,
+                None,
+            ));
         }
         self.sheets.push(SheetState {
             id: sheet_id,
@@ -793,7 +838,7 @@ impl WorkspaceState {
         if !force && !self.sheets[idx].komas.is_empty() {
             let count = self.sheets[idx].komas.len();
             return Err(format!(
-                "Sheet {sheet_id} has {count} open Koma(s); pass --force to close"
+                "Sheet {sheet_id} has {count} open Koma(s); force close is required"
             ));
         }
         let removed = self.sheets.remove(idx);

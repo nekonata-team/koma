@@ -4,9 +4,23 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use koma_ipc::protocol::WebScriptTargetData;
-use makepad_micro_serde::{DeJson, JsonValue};
+use makepad_micro_serde::*;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_HTTP_HEADER_BYTES: usize = 64 * 1024;
+const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Debug, PartialEq, SerJson, DeJson)]
+pub struct ScreenshotOutput {
+    pub koma_id: String,
+    pub path: String,
+}
+
+impl ScreenshotOutput {
+    pub(super) fn to_json_response(&self) -> String {
+        format!("{{\"Ok\":{{\"WebScreenshot\":{}}}}}", self.serialize_json())
+    }
+}
 
 pub(super) fn capture(
     output: Option<&Path>,
@@ -23,9 +37,17 @@ pub(super) fn capture(
         }
     };
     let png = capture_png_over_cdp(target.port, &target.target_id)?;
-    std::fs::write(&dest, &png)
-        .map_err(|e| format!("Failed to write screenshot to {}: {e}", dest.display()))?;
+    write_screenshot_file(&dest, &png)?;
     Ok(dest)
+}
+
+fn write_screenshot_file(dest: &Path, png: &[u8]) -> Result<(), String> {
+    if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
+    }
+    std::fs::write(dest, png)
+        .map_err(|e| format!("Failed to write screenshot to {}: {e}", dest.display()))
 }
 
 fn capture_png_over_cdp(port: u16, target_id: &str) -> Result<Vec<u8>, String> {
@@ -85,14 +107,14 @@ fn capture_png_over_cdp(port: u16, target_id: &str) -> Result<Vec<u8>, String> {
     }
 }
 
-struct WsReader {
-    stream: TcpStream,
+struct WsReader<R> {
+    stream: R,
     buf: Vec<u8>,
     pos: usize,
 }
 
-impl WsReader {
-    fn new(stream: TcpStream) -> Self {
+impl<R: Read> WsReader<R> {
+    fn new(stream: R) -> Self {
         Self {
             stream,
             buf: Vec::new(),
@@ -118,6 +140,11 @@ impl WsReader {
                     return Err(format!("CDP WebSocket upgrade failed: {status_line}"));
                 }
                 return Ok(());
+            }
+            if self.buf.len() - self.pos > MAX_HTTP_HEADER_BYTES {
+                return Err(format!(
+                    "CDP HTTP upgrade header exceeded {MAX_HTTP_HEADER_BYTES} bytes"
+                ));
             }
             let n = self
                 .stream
@@ -172,10 +199,20 @@ impl WsReader {
                 }
                 127 => {
                     let b = self.read_exact_bytes(8)?;
-                    u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]) as usize
+                    let len = u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
+                    usize::try_from(len).map_err(|_| {
+                        format!("CDP WebSocket message exceeded {MAX_WS_MESSAGE_BYTES} bytes")
+                    })?
                 }
                 n => n,
             };
+            if payload_len > MAX_WS_MESSAGE_BYTES
+                || (opcode < 0x8 && out.len().saturating_add(payload_len) > MAX_WS_MESSAGE_BYTES)
+            {
+                return Err(format!(
+                    "CDP WebSocket message exceeded {MAX_WS_MESSAGE_BYTES} bytes"
+                ));
+            }
             let mask = if masked {
                 let m = self.read_exact_bytes(4)?;
                 Some([m[0], m[1], m[2], m[3]])
@@ -279,5 +316,41 @@ mod tests {
         let bytes = capture_png_over_cdp(port, "target-1").unwrap();
         server.join().unwrap();
         assert_eq!(bytes, b"\x89PNG\r\n");
+    }
+
+    #[test]
+    fn rejects_oversized_http_upgrade_and_ws_frames() {
+        let huge_header = vec![b'A'; MAX_HTTP_HEADER_BYTES + 2048];
+        let mut reader = WsReader::new(std::io::Cursor::new(huge_header));
+        let err = reader.read_http_upgrade().unwrap_err();
+        assert!(err.contains("exceeded"), "unexpected error: {err}");
+
+        let mut oversized_frame = vec![0x81, 127];
+        oversized_frame.extend_from_slice(&((MAX_WS_MESSAGE_BYTES as u64) + 1).to_be_bytes());
+        let mut reader = WsReader::new(std::io::Cursor::new(oversized_frame));
+        let err = reader.read_message().unwrap_err();
+        assert!(err.contains("exceeded"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn creates_missing_parent_directories_and_formats_json_output() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("koma-shot-test-{unique}"));
+        let dest = root.join("nested").join("dir").join("shot.png");
+        write_screenshot_file(&dest, b"\x89PNG\r\n").unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"\x89PNG\r\n");
+        let _ = std::fs::remove_dir_all(&root);
+
+        let output = ScreenshotOutput {
+            koma_id: "k-1".into(),
+            path: "/tmp/shot.png".into(),
+        };
+        assert_eq!(
+            output.to_json_response(),
+            r#"{"Ok":{"WebScreenshot":{"koma_id":"k-1","path":"/tmp/shot.png"}}}"#
+        );
     }
 }

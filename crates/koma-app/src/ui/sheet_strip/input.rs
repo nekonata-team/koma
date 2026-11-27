@@ -1,12 +1,10 @@
 //! Pointer drag, pinch zoom, and horizontal scroll routing for `SheetStrip`.
 
-use koma_core::model::{InputMode, KomaId, KomaKind};
-use makepad_app_terminal::widget::MpTerm;
+use koma_core::model::{InputMode, KomaId};
 use makepad_browser_view::ViewOp;
 use makepad_widgets::*;
 
-use crate::ui::web_koma::WebKoma;
-
+use super::widgets::KomaWidget;
 use super::{SheetStrip, SheetStripAction, DRAG_THRESHOLD_PX, HEADER_HEIGHT};
 
 pub(super) enum PinchTarget {
@@ -81,21 +79,24 @@ impl SheetStrip {
                 ((factor * 10.0).round() + f64::from(step)).clamp(5.0, 20.0) / 10.0
             }
         };
-        if let Some(mut term) = widget.borrow_mut::<MpTerm>() {
-            let factor = next(term.cell_size().1, self.scale.terminal);
-            term.set_presentation_font_scale(cx, factor);
-        } else if let Some(mut web) = widget.borrow_mut::<WebKoma>() {
-            let factor = next(web.page_zoom(), self.scale.web);
-            web.set_page_zoom(cx, factor, step == 0);
+        match widget {
+            KomaWidget::Terminal(_) => {
+                if let Some(mut term) = widget.terminal_mut() {
+                    let factor = next(term.cell_size().1, self.scale.terminal);
+                    term.set_presentation_font_scale(cx, factor);
+                }
+            }
+            KomaWidget::Web(_) => {
+                if let Some(mut web) = widget.web_mut() {
+                    let factor = next(web.page_zoom(), self.scale.web);
+                    web.set_page_zoom(cx, factor, step == 0);
+                }
+            }
         }
     }
 
     fn send_web_pinch(&self, cx: &mut Cx, koma_id: &KomaId, op: ViewOp) {
-        if let Some(web) = self
-            .koma_widgets
-            .get(koma_id)
-            .and_then(|w| w.borrow::<WebKoma>())
-        {
+        if let Some(web) = self.koma_widgets.get(koma_id).and_then(KomaWidget::web) {
             web.send_view_op(cx, op);
         }
     }
@@ -124,19 +125,19 @@ impl SheetStrip {
                 };
                 self.content_pinch = sheet.komas.iter().rev().find_map(|slot| {
                     let widget = self.koma_widgets.get(&slot.koma_id)?;
-                    let area = widget.area();
+                    let area = widget.as_widget().area();
                     let Hit::FingerPinch(hit) = event.hits(cx, area) else {
                         return None;
                     };
                     let id = slot.koma_id.clone();
-                    match slot.kind {
-                        KomaKind::Terminal => {
-                            let factor = widget.borrow::<MpTerm>()?.cell_size().1;
+                    match widget {
+                        KomaWidget::Terminal(_) => {
+                            let factor = widget.terminal()?.cell_size().1;
                             Some(PinchTarget::Terminal(ContentPinch::new(id, factor)))
                         }
-                        KomaKind::Web => {
+                        KomaWidget::Web(_) => {
                             let local = hit.abs - area.rect(cx).pos;
-                            let sent = widget.borrow::<WebKoma>()?.send_view_op(
+                            let sent = widget.web()?.send_view_op(
                                 cx,
                                 ViewOp::BeginVisualPinch {
                                     x: local.x,

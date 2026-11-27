@@ -96,21 +96,21 @@ struct KomaViewState {
 }
 
 #[derive(Default)]
-struct PendingEvents {
-    popups: Vec<String>,
-    popup_views: Vec<(ViewId, String)>,
-    external_urls: Vec<String>,
-    file_dialogs: Vec<(ViewId, FileDialogEvent)>,
-    download_requests: Vec<(ViewId, DownloadRequestEvent)>,
-    download_updates: Vec<DownloadUpdateEvent>,
-    js_dialogs: Vec<(ViewId, JsDialogEvent)>,
-    auth_requests: Vec<(ViewId, AuthRequestEvent)>,
-    permission_requests: Vec<(ViewId, SitePermissionEvent)>,
-    closed_komas: Vec<KomaId>,
-    koma_api: Vec<KomaApiEvent>,
-    web_nav: Vec<WebNavEvent>,
-    web_notifications: Vec<WebNotification>,
-    url_changes: Vec<(KomaId, String)>,
+pub struct PendingWebEvents {
+    pub popups: Vec<String>,
+    pub popup_views: Vec<(ViewId, String)>,
+    pub external_urls: Vec<String>,
+    pub file_dialogs: Vec<(ViewId, FileDialogEvent)>,
+    pub download_requests: Vec<(ViewId, DownloadRequestEvent)>,
+    pub download_updates: Vec<DownloadUpdateEvent>,
+    pub js_dialogs: Vec<(ViewId, JsDialogEvent)>,
+    pub auth_requests: Vec<(ViewId, AuthRequestEvent)>,
+    pub permission_requests: Vec<(ViewId, SitePermissionEvent)>,
+    pub closed_komas: Vec<KomaId>,
+    pub koma_api: Vec<KomaApiEvent>,
+    pub web_nav: Vec<WebNavEvent>,
+    pub web_notifications: Vec<WebNotification>,
+    pub url_changes: Vec<(KomaId, String)>,
 }
 
 pub struct WebViewRuntime {
@@ -121,7 +121,7 @@ pub struct WebViewRuntime {
     focused_koma: Option<KomaId>,
     pending_evals: HashMap<u64, PendingEval>,
     pending_script_targets: Vec<PendingScriptTarget>,
-    pending: PendingEvents,
+    pending: PendingWebEvents,
     notification_bridges: HashMap<ViewId, NotificationBridge>,
     bridge_tokens: HashMap<ViewId, String>,
     default_page_zoom: f64,
@@ -139,7 +139,7 @@ impl WebViewRuntime {
             focused_koma: None,
             pending_evals: HashMap::new(),
             pending_script_targets: Vec::new(),
-            pending: PendingEvents::default(),
+            pending: PendingWebEvents::default(),
             notification_bridges: HashMap::new(),
             bridge_tokens: HashMap::new(),
             default_page_zoom: 1.0,
@@ -456,24 +456,8 @@ impl WebViewRuntime {
         Some((state.url.clone(), state.title.clone()))
     }
 
-    pub fn take_popup_urls(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.pending.popups)
-    }
-
-    pub fn take_popup_views(&mut self) -> Vec<(ViewId, String)> {
-        std::mem::take(&mut self.pending.popup_views)
-    }
-
-    pub fn take_external_urls(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.pending.external_urls)
-    }
-
-    pub fn take_closed_komas(&mut self) -> Vec<KomaId> {
-        std::mem::take(&mut self.pending.closed_komas)
-    }
-
-    pub fn take_file_dialogs(&mut self) -> Vec<(ViewId, FileDialogEvent)> {
-        std::mem::take(&mut self.pending.file_dialogs)
+    pub fn drain_events(&mut self) -> PendingWebEvents {
+        std::mem::take(&mut self.pending)
     }
 
     pub fn resolve_file_dialog(
@@ -486,14 +470,6 @@ impl WebViewRuntime {
         self.views
             .send(view_id, ViewOp::FileDialogResult { request_id, paths });
         self.views.service(cx);
-    }
-
-    pub fn take_download_requests(&mut self) -> Vec<(ViewId, DownloadRequestEvent)> {
-        std::mem::take(&mut self.pending.download_requests)
-    }
-
-    pub fn take_download_updates(&mut self) -> Vec<DownloadUpdateEvent> {
-        std::mem::take(&mut self.pending.download_updates)
     }
 
     pub fn resolve_download(
@@ -511,10 +487,6 @@ impl WebViewRuntime {
             },
         );
         self.views.service(cx);
-    }
-
-    pub fn take_js_dialogs(&mut self) -> Vec<(ViewId, JsDialogEvent)> {
-        std::mem::take(&mut self.pending.js_dialogs)
     }
 
     pub fn resolve_js_dialog(
@@ -536,10 +508,6 @@ impl WebViewRuntime {
         self.views.service(cx);
     }
 
-    pub fn take_auth_requests(&mut self) -> Vec<(ViewId, AuthRequestEvent)> {
-        std::mem::take(&mut self.pending.auth_requests)
-    }
-
     pub fn resolve_auth_request(
         &mut self,
         cx: &mut Cx,
@@ -557,10 +525,6 @@ impl WebViewRuntime {
             },
         );
         self.views.service(cx);
-    }
-
-    pub fn take_permission_requests(&mut self) -> Vec<(ViewId, SitePermissionEvent)> {
-        std::mem::take(&mut self.pending.permission_requests)
     }
 
     pub fn resolve_permission_request(
@@ -595,22 +559,6 @@ impl WebViewRuntime {
             self.views.evaluate(view_id, &expr);
         }
         self.views.service(cx);
-    }
-
-    pub fn take_koma_api_events(&mut self) -> Vec<KomaApiEvent> {
-        std::mem::take(&mut self.pending.koma_api)
-    }
-
-    pub fn take_web_nav_events(&mut self) -> Vec<WebNavEvent> {
-        std::mem::take(&mut self.pending.web_nav)
-    }
-
-    pub fn take_web_notifications(&mut self) -> Vec<WebNotification> {
-        std::mem::take(&mut self.pending.web_notifications)
-    }
-
-    pub fn take_url_changes(&mut self) -> Vec<(KomaId, String)> {
-        std::mem::take(&mut self.pending.url_changes)
     }
 
     pub fn set_koma_api_enabled(&mut self, cx: &mut Cx, koma_id: &KomaId, enabled: bool) {
@@ -1022,7 +970,7 @@ impl WebViewRuntime {
                 .reply
                 .send(IpcResponse::err("Browser host is shutting down"));
         }
-        self.pending = PendingEvents::default();
+        self.pending = PendingWebEvents::default();
     }
 
     pub fn koma_ime_caret(&self, koma_id: &KomaId) -> Option<(i32, i32, i32, i32)> {

@@ -1,7 +1,6 @@
 //! Top-level Makepad application integrating Sheets, KeyboardRouter, SheetStrip, and IPC.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -20,8 +19,6 @@ use crate::runtime::ipc_server::IpcServer;
 use crate::runtime::web_views::WebViewRuntime;
 use crate::ui::sheet_strip::SheetStrip;
 
-#[cfg(target_os = "macos")]
-mod default_browser;
 mod events;
 #[cfg(target_os = "macos")]
 mod external_urls;
@@ -31,7 +28,7 @@ mod overlays;
 mod routing;
 mod web_dialogs;
 
-use web_dialogs::{SitePermissionRecord, WebModalRequest};
+use web_dialogs::WebDialogManager;
 
 script_mod! {
     use mod.prelude.widgets.*
@@ -290,19 +287,21 @@ pub struct App {
     #[rust]
     last_web_toast: Option<std::time::Instant>,
     #[rust]
-    next_web_dialog_id: u64,
-    #[rust]
-    pending_web_file_dialogs: HashMap<u64, (makepad_browser_view::ViewId, u64)>,
-    #[rust]
-    pending_web_folder_dialog: Option<(makepad_browser_view::ViewId, u64)>,
-    #[rust]
-    pending_web_downloads: HashMap<u64, (makepad_browser_view::ViewId, u32)>,
-    #[rust]
-    active_web_modal: Option<WebModalRequest>,
-    #[rust]
-    web_modal_queue: VecDeque<WebModalRequest>,
-    #[rust]
-    site_permissions: HashMap<String, SitePermissionRecord>,
+    web_dialogs: WebDialogManager,
+}
+
+pub(super) fn home_dir_string() -> Option<String> {
+    koma_ipc::workspaces::home_dir().map(|p| p.to_string_lossy().into_owned())
+}
+
+pub(super) fn latest_web_url_with(rt: &WebViewRuntime, koma: &KomaMeta) -> Option<String> {
+    if koma.kind != KomaKind::Web {
+        return None;
+    }
+    rt.koma_url_title(&koma.id)
+        .map(|(url, _)| url)
+        .filter(|url| !url.is_empty())
+        .or_else(|| koma.initial_url.clone())
 }
 
 impl App {
@@ -310,6 +309,28 @@ impl App {
         self.web_runtime
             .as_ref()
             .expect("Web runtime is initialized")
+    }
+
+    pub(super) fn latest_web_url(&self, koma_id: &KomaId) -> Option<String> {
+        let koma = self.state.koma_by_id(koma_id)?;
+        latest_web_url_with(&self.web_runtime().borrow(), koma)
+    }
+
+    pub(super) fn latest_web_url_title(&self, koma_id: &KomaId) -> (String, String) {
+        let (live_url, title) = self
+            .web_runtime()
+            .borrow()
+            .koma_url_title(koma_id)
+            .unwrap_or_default();
+        let url = if !live_url.is_empty() {
+            live_url
+        } else {
+            self.state
+                .koma_by_id(koma_id)
+                .and_then(|b| b.initial_url.clone())
+                .unwrap_or_default()
+        };
+        (url, title)
     }
 
     pub(super) fn with_strip<R>(
@@ -716,7 +737,7 @@ impl App {
                 .find(|p| p.name.eq_ignore_ascii_case(name))
                 .map(|p| (p.name.to_owned(), p.komas.to_vec()))
                 .ok_or_else(|| format!("Unknown sheet preset: {name}"))?;
-        let home_dir = std::env::var("HOME").ok();
+        let home_dir = home_dir_string();
         let (idx, _) = self
             .state
             .apply_sheet_preset(&name, &komas, home_dir.as_deref(), true)?;

@@ -1,27 +1,20 @@
-//! Web file dialogs, download save dialogs, modal prompts (JS/auth/permissions), and site permission storage.
+//! Web file dialogs, download save dialogs, modal prompts (JS/auth/permissions), and site permission state.
 
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
-use makepad_micro_serde::*;
+use koma_app::persistence::{self, SitePermissionRecord};
 use makepad_widgets::makepad_platform::file_dialogs::{FileDialog, FileDialogAction};
 use makepad_widgets::*;
 
-use super::App;
+use crate::runtime::web_views::WebViewRuntime;
 
 const SITE_PERMISSION_CAMERA: u32 = 1 << 0;
 const SITE_PERMISSION_MICROPHONE: u32 = 1 << 1;
 const SITE_PERMISSION_GEOLOCATION: u32 = 1 << 2;
 const SITE_PERMISSION_DESKTOP_CAPTURE: u32 = 1 << 3;
 const SITE_PERMISSION_OTHER: u32 = 1 << 4;
-
-#[derive(Clone, Debug, Default, SerJson, DeJson)]
-pub struct SitePermissionRecord {
-    camera: Option<bool>,
-    microphone: Option<bool>,
-    geolocation: Option<bool>,
-    desktop_capture: Option<bool>,
-}
 
 #[derive(Clone, Debug)]
 pub(super) enum WebModalRequest {
@@ -59,24 +52,44 @@ fn site_permission_labels(permissions: u32) -> Vec<&'static str> {
     labels
 }
 
-impl App {
+#[derive(Default)]
+pub(super) struct WebDialogManager {
+    next_id: u64,
+    pending_file_dialogs: HashMap<u64, (makepad_browser_view::ViewId, u64)>,
+    pending_folder_dialog: Option<(makepad_browser_view::ViewId, u64)>,
+    pending_downloads: HashMap<u64, (makepad_browser_view::ViewId, u32)>,
+    active_modal: Option<WebModalRequest>,
+    modal_queue: VecDeque<WebModalRequest>,
+    site_permissions: HashMap<String, SitePermissionRecord>,
+}
+
+impl WebDialogManager {
     fn next_dialog_live_id(&mut self) -> u64 {
-        self.next_web_dialog_id += 1;
-        self.next_web_dialog_id
+        self.next_id += 1;
+        self.next_id
     }
 
-    pub(super) fn open_web_file_dialog(
+    pub(super) fn has_active_modal(&self) -> bool {
+        self.active_modal.is_some()
+    }
+
+    pub(super) fn active_modal_is_js_dialog(&self) -> bool {
+        matches!(self.active_modal, Some(WebModalRequest::JsDialog { .. }))
+    }
+
+    pub(super) fn open_file_dialog(
         &mut self,
         cx: &mut Cx,
+        web_runtime: &RefCell<WebViewRuntime>,
         view_id: makepad_browser_view::ViewId,
         req: makepad_browser_view::FileDialogEvent,
     ) {
         if req.mode == 2 {
             if let Some((prev_view, prev_req)) = self
-                .pending_web_folder_dialog
+                .pending_folder_dialog
                 .replace((view_id, req.request_id))
             {
-                self.web_runtime()
+                web_runtime
                     .borrow_mut()
                     .resolve_file_dialog(cx, prev_view, prev_req, None);
             }
@@ -91,7 +104,7 @@ impl App {
             return;
         }
         let dialog_id = self.next_dialog_live_id();
-        self.pending_web_file_dialogs
+        self.pending_file_dialogs
             .insert(dialog_id, (view_id, req.request_id));
         let mut dialog = FileDialog::new().set_id(LiveId(dialog_id));
         if !req.title.is_empty() {
@@ -125,20 +138,20 @@ impl App {
         }
     }
 
-    pub(super) fn open_web_download_dialog(
+    pub(super) fn open_download_dialog(
         &mut self,
         cx: &mut Cx,
         view_id: makepad_browser_view::ViewId,
         req: makepad_browser_view::DownloadRequestEvent,
     ) {
         let dialog_id = self.next_dialog_live_id();
-        self.pending_web_downloads
+        self.pending_downloads
             .insert(dialog_id, (view_id, req.download_id));
         let mut dialog = FileDialog::new()
             .set_id(LiveId(dialog_id))
             .set_filename(req.suggested_name);
-        if let Some(dir) = std::env::var_os("HOME")
-            .map(|h| PathBuf::from(h).join("Downloads"))
+        if let Some(dir) = koma_ipc::workspaces::home_dir()
+            .map(|h| h.join("Downloads"))
             .filter(|p| p.is_dir())
         {
             dialog = dialog.set_location(dir);
@@ -146,15 +159,20 @@ impl App {
         cx.open_save_file_dialog(dialog);
     }
 
-    pub(super) fn handle_web_file_dialog_action(&mut self, cx: &mut Cx, action: &FileDialogAction) {
+    pub(super) fn handle_file_dialog_action(
+        &mut self,
+        cx: &mut Cx,
+        web_runtime: &RefCell<WebViewRuntime>,
+        action: &FileDialogAction,
+    ) {
         match action {
             FileDialogAction::FileSelected { id, paths } => {
-                if let Some((view_id, request_id)) = self.pending_web_file_dialogs.remove(&id.0) {
+                if let Some((view_id, request_id)) = self.pending_file_dialogs.remove(&id.0) {
                     let strs = paths
                         .iter()
                         .map(|p| p.to_string_lossy().into_owned())
                         .collect();
-                    self.web_runtime().borrow_mut().resolve_file_dialog(
+                    web_runtime.borrow_mut().resolve_file_dialog(
                         cx,
                         view_id,
                         request_id,
@@ -163,25 +181,23 @@ impl App {
                 }
             }
             FileDialogAction::FileCancelled { id } => {
-                if let Some((view_id, request_id)) = self.pending_web_file_dialogs.remove(&id.0) {
-                    self.web_runtime()
+                if let Some((view_id, request_id)) = self.pending_file_dialogs.remove(&id.0) {
+                    web_runtime
                         .borrow_mut()
                         .resolve_file_dialog(cx, view_id, request_id, None);
                 }
             }
             FileDialogAction::SaveFileSelected { id, path } => {
                 let path_str = path.to_string_lossy().into_owned();
-                if let Some((view_id, request_id)) = self.pending_web_file_dialogs.remove(&id.0) {
-                    self.web_runtime().borrow_mut().resolve_file_dialog(
+                if let Some((view_id, request_id)) = self.pending_file_dialogs.remove(&id.0) {
+                    web_runtime.borrow_mut().resolve_file_dialog(
                         cx,
                         view_id,
                         request_id,
                         Some(vec![path_str]),
                     );
-                } else if let Some((view_id, download_id)) =
-                    self.pending_web_downloads.remove(&id.0)
-                {
-                    self.web_runtime().borrow_mut().resolve_download(
+                } else if let Some((view_id, download_id)) = self.pending_downloads.remove(&id.0) {
+                    web_runtime.borrow_mut().resolve_download(
                         cx,
                         view_id,
                         download_id,
@@ -190,25 +206,20 @@ impl App {
                 }
             }
             FileDialogAction::SaveFileCancelled { id } => {
-                if let Some((view_id, request_id)) = self.pending_web_file_dialogs.remove(&id.0) {
-                    self.web_runtime()
+                if let Some((view_id, request_id)) = self.pending_file_dialogs.remove(&id.0) {
+                    web_runtime
                         .borrow_mut()
                         .resolve_file_dialog(cx, view_id, request_id, None);
-                } else if let Some((view_id, download_id)) =
-                    self.pending_web_downloads.remove(&id.0)
-                {
-                    self.web_runtime().borrow_mut().resolve_download(
-                        cx,
-                        view_id,
-                        download_id,
-                        None,
-                    );
+                } else if let Some((view_id, download_id)) = self.pending_downloads.remove(&id.0) {
+                    web_runtime
+                        .borrow_mut()
+                        .resolve_download(cx, view_id, download_id, None);
                 }
             }
             FileDialogAction::FolderSelected(path) => {
-                if let Some((view_id, request_id)) = self.pending_web_folder_dialog.take() {
+                if let Some((view_id, request_id)) = self.pending_folder_dialog.take() {
                     let path_str = path.to_string_lossy().into_owned();
-                    self.web_runtime().borrow_mut().resolve_file_dialog(
+                    web_runtime.borrow_mut().resolve_file_dialog(
                         cx,
                         view_id,
                         request_id,
@@ -217,8 +228,8 @@ impl App {
                 }
             }
             FileDialogAction::FolderCancelled => {
-                if let Some((view_id, request_id)) = self.pending_web_folder_dialog.take() {
-                    self.web_runtime()
+                if let Some((view_id, request_id)) = self.pending_folder_dialog.take() {
+                    web_runtime
                         .borrow_mut()
                         .resolve_file_dialog(cx, view_id, request_id, None);
                 }
@@ -227,20 +238,19 @@ impl App {
         }
     }
 
-    pub(super) fn enqueue_web_modal(&mut self, cx: &mut Cx, request: WebModalRequest) {
-        self.web_modal_queue.push_back(request);
-        if self.active_web_modal.is_none() {
-            self.present_next_web_modal(cx);
+    pub(super) fn enqueue_modal(&mut self, cx: &mut Cx, ui: &WidgetRef, request: WebModalRequest) {
+        self.modal_queue.push_back(request);
+        if self.active_modal.is_none() {
+            self.present_next_modal(cx, ui);
         }
     }
 
-    fn present_next_web_modal(&mut self, cx: &mut Cx) {
-        let Some(request) = self.web_modal_queue.pop_front() else {
-            self.apply_focus(cx);
-            return;
+    fn present_next_modal(&mut self, cx: &mut Cx, ui: &WidgetRef) -> bool {
+        let Some(request) = self.modal_queue.pop_front() else {
+            return false;
         };
-        let input = self.ui.text_input(cx, ids!(web_modal_input));
-        let password = self.ui.text_input(cx, ids!(web_modal_password));
+        let input = ui.text_input(cx, ids!(web_modal_input));
+        let password = ui.text_input(cx, ids!(web_modal_password));
         match &request {
             WebModalRequest::JsDialog { req, .. } => {
                 let origin = if req.origin_url.is_empty() {
@@ -253,12 +263,8 @@ impl App {
                 } else {
                     req.message.clone()
                 };
-                self.ui
-                    .label(cx, ids!(web_modal_origin))
-                    .set_text(cx, &origin);
-                self.ui
-                    .label(cx, ids!(web_modal_message))
-                    .set_text(cx, &message);
+                ui.label(cx, ids!(web_modal_origin)).set_text(cx, &origin);
+                ui.label(cx, ids!(web_modal_message)).set_text(cx, &message);
                 let is_prompt = req.kind == 2;
                 input.set_visible(cx, is_prompt);
                 password.set_visible(cx, false);
@@ -274,9 +280,8 @@ impl App {
                     2 => ("Prompt", "OK", "Cancel"),
                     _ => ("Leave page?", "Leave", "Stay"),
                 };
-                self.active_web_modal = Some(request);
-                self.ui
-                    .dialog(cx, ids!(web_modal_dialog))
+                self.active_modal = Some(request);
+                ui.dialog(cx, ids!(web_modal_dialog))
                     .ask(cx, title, confirm, cancel);
                 if is_prompt {
                     input.set_key_focus(cx);
@@ -293,18 +298,15 @@ impl App {
                 } else {
                     format!("{target} — {}", req.realm)
                 };
-                self.ui
-                    .label(cx, ids!(web_modal_origin))
-                    .set_text(cx, &origin);
-                self.ui
-                    .label(cx, ids!(web_modal_message))
+                ui.label(cx, ids!(web_modal_origin)).set_text(cx, &origin);
+                ui.label(cx, ids!(web_modal_message))
                     .set_text(cx, "Enter your username and password.");
                 input.set_visible(cx, true);
                 input.set_text(cx, "");
                 password.set_visible(cx, true);
                 password.set_text(cx, "");
-                self.active_web_modal = Some(request);
-                self.ui.dialog(cx, ids!(web_modal_dialog)).ask(
+                self.active_modal = Some(request);
+                ui.dialog(cx, ids!(web_modal_dialog)).ask(
                     cx,
                     &format!("Sign in to {target}"),
                     "Sign In",
@@ -319,18 +321,15 @@ impl App {
                     req.origin.clone()
                 };
                 let labels = site_permission_labels(req.permissions);
-                self.ui
-                    .label(cx, ids!(web_modal_origin))
-                    .set_text(cx, &origin);
-                self.ui
-                    .label(cx, ids!(web_modal_message))
+                ui.label(cx, ids!(web_modal_origin)).set_text(cx, &origin);
+                ui.label(cx, ids!(web_modal_message))
                     .set_text(cx, &format!("Allow access to {}?", labels.join(", ")));
                 input.set_visible(cx, false);
                 input.set_text(cx, "");
                 password.set_visible(cx, false);
                 password.set_text(cx, "");
-                self.active_web_modal = Some(request);
-                self.ui.dialog(cx, ids!(web_modal_dialog)).ask(
+                self.active_modal = Some(request);
+                ui.dialog(cx, ids!(web_modal_dialog)).ask(
                     cx,
                     "Permission request",
                     "Allow",
@@ -338,14 +337,25 @@ impl App {
                 );
             }
         }
+        true
     }
 
-    pub(super) fn resolve_active_web_modal(&mut self, cx: &mut Cx, accepted: bool) {
-        let Some(request) = self.active_web_modal.take() else {
-            return;
+    /// Resolves the active modal and presents the next queued one if any.
+    /// Returns `true` if another modal is now active, `false` if focus should be restored.
+    pub(super) fn resolve_active_modal(
+        &mut self,
+        cx: &mut Cx,
+        ui: &WidgetRef,
+        web_runtime: &RefCell<WebViewRuntime>,
+        state_dir: Option<&Path>,
+        is_private: bool,
+        accepted: bool,
+    ) -> bool {
+        let Some(request) = self.active_modal.take() else {
+            return true;
         };
-        let input_text = self.ui.text_input(cx, ids!(web_modal_input)).text();
-        let password_text = self.ui.text_input(cx, ids!(web_modal_password)).text();
+        let input_text = ui.text_input(cx, ids!(web_modal_input)).text();
+        let password_text = ui.text_input(cx, ids!(web_modal_password)).text();
         match request {
             WebModalRequest::JsDialog { view_id, req } => {
                 let accept = if req.kind == 0 { true } else { accepted };
@@ -354,7 +364,7 @@ impl App {
                 } else {
                     String::new()
                 };
-                self.web_runtime().borrow_mut().resolve_js_dialog(
+                web_runtime.borrow_mut().resolve_js_dialog(
                     cx,
                     view_id,
                     req.request_id,
@@ -364,7 +374,7 @@ impl App {
             }
             WebModalRequest::Auth { view_id, req } => {
                 let username = accepted.then_some(input_text);
-                self.web_runtime().borrow_mut().resolve_auth_request(
+                web_runtime.borrow_mut().resolve_auth_request(
                     cx,
                     view_id,
                     req.request_id,
@@ -373,8 +383,14 @@ impl App {
                 );
             }
             WebModalRequest::Permission { view_id, req } => {
-                self.record_site_permission(&req.origin, req.permissions, accepted);
-                self.web_runtime().borrow_mut().resolve_permission_request(
+                self.record_site_permission(
+                    &req.origin,
+                    req.permissions,
+                    accepted,
+                    state_dir,
+                    is_private,
+                );
+                web_runtime.borrow_mut().resolve_permission_request(
                     cx,
                     view_id,
                     req.request_id,
@@ -382,30 +398,13 @@ impl App {
                 );
             }
         }
-        self.present_next_web_modal(cx);
+        self.present_next_modal(cx, ui)
     }
 
     pub(super) fn load_site_permissions(&mut self, state_dir: &Path) {
-        let path = state_dir.join("site_permissions.json");
-        let Ok(raw) = std::fs::read_to_string(path) else {
-            return;
-        };
-        if let Ok(entries) = HashMap::<String, SitePermissionRecord>::deserialize_json(&raw) {
+        if let Ok(entries) = persistence::load_site_permissions(state_dir) {
             self.site_permissions = entries;
         }
-    }
-
-    fn save_site_permissions(&self) {
-        if self.is_private {
-            return;
-        }
-        let Some(dir) = self.state_dir.as_ref() else {
-            return;
-        };
-        let path = dir.join("site_permissions.json");
-        let tmp = dir.join("site_permissions.json.tmp");
-        let json = self.site_permissions.serialize_json();
-        let _ = std::fs::write(&tmp, json).and_then(|()| std::fs::rename(&tmp, &path));
     }
 
     pub(super) fn check_site_permission(&self, origin: &str, permissions: u32) -> Option<bool> {
@@ -434,7 +433,14 @@ impl App {
         (any_requested && all_allowed).then_some(true)
     }
 
-    fn record_site_permission(&mut self, origin: &str, permissions: u32, granted: bool) {
+    fn record_site_permission(
+        &mut self,
+        origin: &str,
+        permissions: u32,
+        granted: bool,
+        state_dir: Option<&Path>,
+        is_private: bool,
+    ) {
         if origin.is_empty() || (permissions & SITE_PERMISSION_OTHER) != 0 {
             return;
         }
@@ -451,6 +457,10 @@ impl App {
         if (permissions & SITE_PERMISSION_DESKTOP_CAPTURE) != 0 {
             rec.desktop_capture = Some(granted);
         }
-        self.save_site_permissions();
+        if !is_private {
+            if let Some(dir) = state_dir {
+                let _ = persistence::save_site_permissions(dir, &self.site_permissions);
+            }
+        }
     }
 }

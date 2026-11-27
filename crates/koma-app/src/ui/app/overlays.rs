@@ -234,21 +234,10 @@ impl App {
                 "Save Sheet Preset:",
                 self.state.current_sheet().label.clone(),
             ),
-            PromptMode::EditKomaUrl(koma_id) => {
-                let current_url = self
-                    .web_runtime()
-                    .borrow()
-                    .koma_url_title(koma_id)
-                    .map(|(u, _)| u)
-                    .filter(|u| !u.is_empty())
-                    .or_else(|| {
-                        self.state
-                            .koma_by_id(koma_id)
-                            .and_then(|b| b.initial_url.clone())
-                    })
-                    .unwrap_or_default();
-                ("Edit URL:", current_url)
-            }
+            PromptMode::EditKomaUrl(koma_id) => (
+                "Edit URL:",
+                self.latest_web_url(koma_id).unwrap_or_default(),
+            ),
             PromptMode::RenameKoma(koma_id) => {
                 let current = self
                     .state
@@ -367,7 +356,7 @@ impl App {
         self.ui
             .view(cx, ids!(palette_overlay))
             .set_visible(cx, false);
-        let home_dir = std::env::var("HOME").ok();
+        let home_dir = super::home_dir_string();
 
         match mode {
             PromptMode::OpenKoma => {

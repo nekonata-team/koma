@@ -1,5 +1,5 @@
 use std::num::{NonZeroU64, NonZeroUsize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use koma_ipc::protocol::{
@@ -38,13 +38,32 @@ struct OptionalKoma {
 }
 
 #[derive(Debug, clap::Args)]
-struct CreatePlacement {
-    #[arg(long, value_name = "KOMA_ID", group = "create_placement")]
+struct PlacementFlags {
+    #[arg(long, value_name = "KOMA_ID", group = "placement")]
     left_of: Option<String>,
-    #[arg(long, value_name = "KOMA_ID", group = "create_placement")]
+    #[arg(long, value_name = "KOMA_ID", group = "placement")]
     right_of: Option<String>,
-    #[arg(long, value_name = "SHEET_ID", group = "create_placement")]
+    #[arg(long, value_name = "SHEET_ID", group = "placement")]
     end_of: Option<String>,
+}
+
+impl PlacementFlags {
+    fn is_empty(&self) -> bool {
+        self.left_of.is_none() && self.right_of.is_none() && self.end_of.is_none()
+    }
+
+    fn into_placement(self) -> Option<KomaPlacement> {
+        self.left_of
+            .map(KomaPlacement::LeftOf)
+            .or_else(|| self.right_of.map(KomaPlacement::RightOf))
+            .or_else(|| self.end_of.map(KomaPlacement::EndOf))
+    }
+}
+
+#[derive(Debug, clap::Args)]
+struct CreatePlacement {
+    #[command(flatten)]
+    placement: PlacementFlags,
     /// Set initial width in points.
     #[arg(long)]
     width: Option<f64>,
@@ -53,14 +72,45 @@ struct CreatePlacement {
     focus: bool,
 }
 
-impl CreatePlacement {
-    fn placement(&self) -> Option<KomaPlacement> {
-        self.left_of
-            .clone()
-            .map(KomaPlacement::LeftOf)
-            .or_else(|| self.right_of.clone().map(KomaPlacement::RightOf))
-            .or_else(|| self.end_of.clone().map(KomaPlacement::EndOf))
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct CliEnv {
+    pub(super) caller_koma_id: Option<String>,
+    pub(super) profile_id: Option<String>,
+}
+
+impl CliEnv {
+    pub(super) fn from_process() -> Self {
+        Self {
+            caller_koma_id: std::env::var("KOMA_KOMA_ID").ok().filter(|s| !s.is_empty()),
+            profile_id: std::env::var("KOMA_PROFILE").ok().filter(|s| !s.is_empty()),
+        }
     }
+
+    fn request(self, command: IpcCommand) -> IpcRequest {
+        IpcRequest {
+            caller_koma_id: self.caller_koma_id,
+            profile_id: self.profile_id,
+            command,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub(super) enum CliAction {
+    Settings {
+        path_only: bool,
+    },
+    WorkspaceList,
+    WebScript {
+        request: IpcRequest,
+        file: PathBuf,
+        timeout: NonZeroU64,
+    },
+    WebScreenshot {
+        request: IpcRequest,
+        output: Option<PathBuf>,
+    },
+    Ipc(IpcRequest),
 }
 
 #[derive(Debug, Parser)]
@@ -124,12 +174,8 @@ enum Command {
     Move {
         #[command(flatten)]
         target: RequiredKoma,
-        #[arg(long, value_name = "KOMA_ID", group = "placement")]
-        left_of: Option<String>,
-        #[arg(long, value_name = "KOMA_ID", group = "placement")]
-        right_of: Option<String>,
-        #[arg(long, value_name = "SHEET_ID", group = "placement")]
-        end_of: Option<String>,
+        #[command(flatten)]
+        placement: PlacementFlags,
     },
     /// Set the fixed width of --koma in points.
     Resize {
@@ -441,12 +487,7 @@ enum Bench {
 impl Args {
     pub(super) fn validate(self) -> Result<Self, clap::Error> {
         match &self.command {
-            Command::Move {
-                left_of: None,
-                right_of: None,
-                end_of: None,
-                ..
-            } => {
+            Command::Move { placement, .. } if placement.is_empty() => {
                 return Err(Self::command().error(
                     ErrorKind::MissingRequiredArgument,
                     "one of --left-of, --right-of, or --end-of is required",
@@ -477,25 +518,36 @@ impl Args {
         Ok(self)
     }
 
-    pub(super) fn settings_path_only(&self) -> Option<bool> {
-        match &self.command {
+    pub(super) fn into_action(self, env: CliEnv) -> Result<CliAction, String> {
+        let command = match self.command {
             Command::Settings {
                 path,
                 command: None,
-            } => Some(*path),
-            _ => None,
-        }
-    }
-
-    pub(super) fn lists_workspaces(&self) -> bool {
-        matches!(self.command, Command::Workspace(Workspace::List))
-    }
-
-    pub(super) fn into_request(self) -> IpcRequest {
-        let command = match self.command {
+            } => return Ok(CliAction::Settings { path_only: path }),
+            Command::Workspace(Workspace::List) => return Ok(CliAction::WorkspaceList),
+            Command::Web(Web::Script {
+                target,
+                file,
+                timeout,
+            }) => {
+                return Ok(CliAction::WebScript {
+                    request: env.request(IpcCommand::Web(WebCommand::ScriptTarget(KomaTarget {
+                        koma_id: target.koma,
+                    }))),
+                    file,
+                    timeout,
+                });
+            }
+            Command::Web(Web::Screenshot { target, path }) => {
+                return Ok(CliAction::WebScreenshot {
+                    request: env.request(IpcCommand::Web(WebCommand::ScriptTarget(KomaTarget {
+                        koma_id: target.koma,
+                    }))),
+                    output: path,
+                });
+            }
             Command::Health => IpcCommand::Workspace(WorkspaceCommand::Health),
             Command::Private => IpcCommand::Workspace(WorkspaceCommand::Private),
-            Command::Workspace(Workspace::List) => unreachable!("workspace list is local"),
             Command::Profile(Profile::List) => IpcCommand::Workspace(WorkspaceCommand::ProfileList),
             Command::Profile(Profile::New { name }) => {
                 IpcCommand::Workspace(WorkspaceCommand::ProfileNew { id: name })
@@ -537,18 +589,11 @@ impl Args {
             Command::Focus { target } => IpcCommand::Koma(KomaCommand::Focus {
                 koma_id: target.koma,
             }),
-            Command::Move {
-                target,
-                left_of,
-                right_of,
-                end_of,
-            } => IpcCommand::Koma(KomaCommand::Move {
+            Command::Move { target, placement } => IpcCommand::Koma(KomaCommand::Move {
                 koma_id: target.koma,
-                placement: left_of
-                    .map(KomaPlacement::LeftOf)
-                    .or_else(|| right_of.map(KomaPlacement::RightOf))
-                    .or_else(|| end_of.map(KomaPlacement::EndOf))
-                    .unwrap(),
+                placement: placement.into_placement().ok_or_else(|| {
+                    "one of --left-of, --right-of, or --end-of is required".to_string()
+                })?,
             }),
             Command::Resize { target, width } => IpcCommand::Koma(KomaCommand::Resize {
                 koma_id: target.koma,
@@ -564,7 +609,7 @@ impl Args {
             }) => IpcCommand::Web(WebCommand::New(WebNewArgs {
                 url,
                 koma_api,
-                placement: placement.placement(),
+                placement: placement.placement.into_placement(),
                 width: placement.width,
                 focus: placement.focus,
             })),
@@ -605,12 +650,6 @@ impl Args {
                 IpcCommand::Web(WebCommand::Eval(WebEvalArgs {
                     koma_id: target.koma,
                     script: expr,
-                }))
-            }
-            Command::Web(Web::Script { target, .. })
-            | Command::Web(Web::Screenshot { target, .. }) => {
-                IpcCommand::Web(WebCommand::ScriptTarget(KomaTarget {
-                    koma_id: target.koma,
                 }))
             }
             Command::Web(Web::Snapshot {
@@ -670,7 +709,7 @@ impl Args {
             }) => IpcCommand::Terminal(TerminalCommand::New(TerminalNewArgs {
                 cwd,
                 run,
-                placement: placement.placement(),
+                placement: placement.placement.into_placement(),
                 width: placement.width,
                 focus: placement.focus,
             })),
@@ -756,27 +795,8 @@ impl Args {
                 command: Some(SettingsAction::Reload),
                 ..
             } => IpcCommand::Workspace(WorkspaceCommand::SettingsReload),
-            Command::Settings { .. } => unreachable!("settings is handled locally"),
         };
-        IpcRequest {
-            caller_koma_id: std::env::var("KOMA_KOMA_ID").ok().filter(|s| !s.is_empty()),
-            profile_id: std::env::var("KOMA_PROFILE").ok().filter(|s| !s.is_empty()),
-            command,
-        }
-    }
-
-    pub(super) fn web_script(&self) -> Option<(&Path, NonZeroU64)> {
-        let Command::Web(Web::Script { file, timeout, .. }) = &self.command else {
-            return None;
-        };
-        Some((file, *timeout))
-    }
-
-    pub(super) fn web_screenshot(&self) -> Option<Option<&Path>> {
-        let Command::Web(Web::Screenshot { path, .. }) = &self.command else {
-            return None;
-        };
-        Some(path.as_deref())
+        Ok(CliAction::Ipc(env.request(command)))
     }
 }
 
@@ -787,6 +807,13 @@ mod tests {
     fn parse(argv: &[&str]) -> Result<Args, clap::Error> {
         Args::try_parse_from(std::iter::once("koma").chain(argv.iter().copied()))
             .and_then(Args::validate)
+    }
+
+    fn parse_ipc(argv: &[&str]) -> IpcRequest {
+        match parse(argv).unwrap().into_action(CliEnv::default()).unwrap() {
+            CliAction::Ipc(req) => req,
+            other => panic!("expected Ipc action for {argv:?}, got {other:?}"),
+        }
     }
 
     #[test]
@@ -939,32 +966,87 @@ mod tests {
                 IpcCommand::Workspace(WorkspaceCommand::SettingsReload),
             ),
         ] {
-            let req = parse(argv).unwrap().into_request();
+            let req = parse_ipc(argv);
             assert_eq!(req.command, expected);
         }
     }
 
     #[test]
-    fn web_script_resolves_a_koma_without_sending_the_source_path() {
-        let args = parse(&["web", "script", "--koma", "koma-2", "-"]).unwrap();
-        let (file, timeout) = args.web_script().unwrap();
-        assert_eq!(file, Path::new("-"));
-        assert_eq!(timeout.get(), 30);
+    fn maps_local_and_composite_actions_with_injected_env() {
+        let env = CliEnv {
+            caller_koma_id: Some("caller-1".into()),
+            profile_id: Some("work".into()),
+        };
+
         assert_eq!(
-            args.into_request().command,
-            IpcCommand::Web(WebCommand::ScriptTarget(KomaTarget {
-                koma_id: Some("koma-2".into())
-            }))
+            parse(&["settings"])
+                .unwrap()
+                .into_action(env.clone())
+                .unwrap(),
+            CliAction::Settings { path_only: false }
+        );
+        assert_eq!(
+            parse(&["settings", "--path"])
+                .unwrap()
+                .into_action(env.clone())
+                .unwrap(),
+            CliAction::Settings { path_only: true }
+        );
+        assert_eq!(
+            parse(&["workspace", "list"])
+                .unwrap()
+                .into_action(env.clone())
+                .unwrap(),
+            CliAction::WorkspaceList
+        );
+        assert_eq!(
+            parse(&["health"])
+                .unwrap()
+                .into_action(env.clone())
+                .unwrap(),
+            CliAction::Ipc(IpcRequest {
+                caller_koma_id: Some("caller-1".into()),
+                profile_id: Some("work".into()),
+                command: IpcCommand::Workspace(WorkspaceCommand::Health),
+            })
+        );
+
+        let script = parse(&["web", "script", "--koma", "koma-2", "-"])
+            .unwrap()
+            .into_action(env.clone())
+            .unwrap();
+        assert_eq!(
+            script,
+            CliAction::WebScript {
+                request: IpcRequest {
+                    caller_koma_id: Some("caller-1".into()),
+                    profile_id: Some("work".into()),
+                    command: IpcCommand::Web(WebCommand::ScriptTarget(KomaTarget {
+                        koma_id: Some("koma-2".into()),
+                    })),
+                },
+                file: PathBuf::from("-"),
+                timeout: NonZeroU64::new(30).unwrap(),
+            }
         );
         assert!(parse(&["web", "script", "--timeout", "0", "test.mjs"]).is_err());
 
-        let shot = parse(&["web", "screenshot", "--koma", "koma-2", "/tmp/out.png"]).unwrap();
-        assert_eq!(shot.web_screenshot(), Some(Some(Path::new("/tmp/out.png"))));
+        let shot = parse(&["web", "screenshot", "--koma", "koma-2", "/tmp/out.png"])
+            .unwrap()
+            .into_action(env)
+            .unwrap();
         assert_eq!(
-            shot.into_request().command,
-            IpcCommand::Web(WebCommand::ScriptTarget(KomaTarget {
-                koma_id: Some("koma-2".into())
-            }))
+            shot,
+            CliAction::WebScreenshot {
+                request: IpcRequest {
+                    caller_koma_id: Some("caller-1".into()),
+                    profile_id: Some("work".into()),
+                    command: IpcCommand::Web(WebCommand::ScriptTarget(KomaTarget {
+                        koma_id: Some("koma-2".into()),
+                    })),
+                },
+                output: Some(PathBuf::from("/tmp/out.png")),
+            }
         );
         assert!(parse(&["web", "new", "https://example.com", "--width", "0"]).is_err());
         assert!(parse(&["terminal", "new", "--left-of", "k1", "--end-of", "s1"]).is_err());
@@ -978,9 +1060,7 @@ mod tests {
         assert!(parse(&["move", "--koma", "b1"]).is_err());
         assert!(parse(&["move", "--koma", "b1", "--left-of", "b2", "--end-of", "d1"]).is_err());
         assert!(parse(&["resize", "--koma", "b1", "--width", "NaN"]).is_err());
-        let request = parse(&["move", "--koma", "b1", "--end-of", "d1"])
-            .unwrap()
-            .into_request();
+        let request = parse_ipc(&["move", "--koma", "b1", "--end-of", "d1"]);
         assert_eq!(
             request.command,
             IpcCommand::Koma(KomaCommand::Move {
@@ -999,7 +1079,9 @@ mod tests {
         .unwrap();
         assert!(args.json);
         assert_eq!(args.socket.as_deref(), Some("two"));
-        let req = args.into_request();
+        let CliAction::Ipc(req) = args.into_action(CliEnv::default()).unwrap() else {
+            panic!("expected Ipc action");
+        };
         assert_eq!(
             req.command,
             IpcCommand::Web(WebCommand::Read(WebReadArgs {
@@ -1008,16 +1090,14 @@ mod tests {
             }))
         );
 
-        let req = parse(&[
+        let req = parse_ipc(&[
             "drawer",
             "keep",
             "example.com",
             "--title",
             "Ex",
             "--koma-api",
-        ])
-        .unwrap()
-        .into_request();
+        ]);
         assert_eq!(
             req.command,
             IpcCommand::Drawer(DrawerCommand::Keep(DrawerKeepArgs {
@@ -1027,9 +1107,7 @@ mod tests {
             }))
         );
 
-        let req = parse(&["notification", "send", "Build done", "--title", "-CI"])
-            .unwrap()
-            .into_request();
+        let req = parse_ipc(&["notification", "send", "Build done", "--title", "-CI"]);
         assert_eq!(
             req.command,
             IpcCommand::Notification(NotificationCommand::Send(NotificationSendArgs {
@@ -1042,9 +1120,7 @@ mod tests {
 
     #[test]
     fn accepts_hyphenated_payloads_after_separator() {
-        let req = parse(&["terminal", "send", "--", "-n"])
-            .unwrap()
-            .into_request();
+        let req = parse_ipc(&["terminal", "send", "--", "-n"]);
         assert_eq!(
             req.command,
             IpcCommand::Terminal(TerminalCommand::Send(KomaTextArgs {
@@ -1056,9 +1132,7 @@ mod tests {
 
     #[test]
     fn validates_lines_and_conflicting_flags() {
-        let req = parse(&["terminal", "text", "--lines", "20"])
-            .unwrap()
-            .into_request();
+        let req = parse_ipc(&["terminal", "text", "--lines", "20"]);
         assert_eq!(
             req.command,
             IpcCommand::Terminal(TerminalCommand::Text(TerminalTextArgs {
