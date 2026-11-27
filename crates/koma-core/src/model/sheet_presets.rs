@@ -21,15 +21,16 @@ impl WorkspaceState {
                 KomaKind::Terminal => {
                     let cwd = b.cwd.as_deref().filter(|s| !s.trim().is_empty());
                     let cmd = b.command.as_deref().filter(|s| !s.trim().is_empty());
-                    let formatted = match (cwd, cmd) {
-                        (Some(c), Some(m)) => {
-                            if c.chars().any(char::is_whitespace) {
-                                format!(":terminal \"{c}\" {m}")
-                            } else {
-                                format!(":terminal {c} {m}")
-                            }
+                    let quote_cwd = |c: &str| {
+                        if c.chars().any(char::is_whitespace) {
+                            format!("\"{c}\"")
+                        } else {
+                            c.to_string()
                         }
-                        (Some(c), None) => format!(":terminal {c}"),
+                    };
+                    let formatted = match (cwd, cmd) {
+                        (Some(c), Some(m)) => format!(":terminal {} {m}", quote_cwd(c)),
+                        (Some(c), None) => format!(":terminal {}", quote_cwd(c)),
                         (None, Some(m)) => format!(":terminal {m}"),
                         (None, None) => ":terminal".into(),
                     };
@@ -148,5 +149,43 @@ mod tests {
             state.sheets[2].komas[1].initial_url.as_deref(),
             Some("https://makepad.nl")
         );
+    }
+
+    #[test]
+    fn sheet_preset_round_trips_terminal_cwd_with_whitespace() {
+        let mut state = WorkspaceState::new();
+        state.insert_koma_with_command(
+            KomaKind::Terminal,
+            "Spaces".into(),
+            None,
+            Some("/Users/test/My Projects".into()),
+            None,
+        );
+        state.insert_koma_with_command(
+            KomaKind::Terminal,
+            "SpacesCmd".into(),
+            None,
+            Some("/Users/test/My Projects".into()),
+            Some("cargo test".into()),
+        );
+
+        let preset = state.save_current_sheet_as_preset("Spaces").unwrap();
+        assert_eq!(
+            preset.komas,
+            vec![
+                ":terminal \"/Users/test/My Projects\"".to_string(),
+                ":terminal \"/Users/test/My Projects\" cargo test".to_string(),
+            ]
+        );
+
+        let (idx, _) = state
+            .apply_sheet_preset("Spaces", &preset.komas, None, true)
+            .unwrap();
+        let komas = &state.sheets[idx].komas;
+        assert_eq!(komas.len(), 2);
+        assert_eq!(komas[0].cwd.as_deref(), Some("/Users/test/My Projects"));
+        assert_eq!(komas[0].command, None);
+        assert_eq!(komas[1].cwd.as_deref(), Some("/Users/test/My Projects"));
+        assert_eq!(komas[1].command.as_deref(), Some("cargo test"));
     }
 }

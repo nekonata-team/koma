@@ -147,18 +147,35 @@ pub fn to_json(state: &WorkspaceState) -> String {
     .serialize_json_pretty()
 }
 
-pub fn from_json(text: &str) -> Result<WorkspaceState, String> {
-    let saved =
-        SavedState::deserialize_json(text).map_err(|e| format!("Invalid state JSON: {e:?}"))?;
+enum ParseStateError {
+    UnsupportedVersion(usize),
+    Corrupt(String),
+}
+
+impl ParseStateError {
+    fn into_message(self) -> String {
+        match self {
+            Self::UnsupportedVersion(version) => format!("Unsupported state version {version}"),
+            Self::Corrupt(msg) => msg,
+        }
+    }
+}
+
+fn parse_state(text: &str) -> Result<WorkspaceState, ParseStateError> {
+    let saved = SavedState::deserialize_json(text)
+        .map_err(|e| ParseStateError::Corrupt(format!("Invalid state JSON: {e:?}")))?;
     if saved.version != VERSION {
-        return Err(format!("Unsupported state version {}", saved.version));
+        return Err(ParseStateError::UnsupportedVersion(saved.version));
     }
     let mut sheets = Vec::new();
     for d in saved.sheets {
         let sheet_id = SheetId::from(d.id);
         let mut komas = Vec::new();
         for b in d.komas {
-            komas.push(b.into_meta(Some(sheet_id.clone()), saved.profile_id.clone())?);
+            komas.push(
+                b.into_meta(Some(sheet_id.clone()), saved.profile_id.clone())
+                    .map_err(ParseStateError::Corrupt)?,
+            );
         }
         sheets.push(SheetState {
             id: sheet_id,
@@ -169,7 +186,10 @@ pub fn from_json(text: &str) -> Result<WorkspaceState, String> {
     }
     let mut drawer = Vec::new();
     for b in saved.drawer.unwrap_or_default() {
-        drawer.push(b.into_meta(None, saved.profile_id.clone())?);
+        drawer.push(
+            b.into_meta(None, saved.profile_id.clone())
+                .map_err(ParseStateError::Corrupt)?,
+        );
     }
     let recents = saved
         .recents
@@ -190,7 +210,8 @@ pub fn from_json(text: &str) -> Result<WorkspaceState, String> {
         })
         .collect();
     let mut state =
-        WorkspaceState::restore_layout(saved.profile_id, sheets, saved.active_sheet, drawer)?;
+        WorkspaceState::restore_layout(saved.profile_id, sheets, saved.active_sheet, drawer)
+            .map_err(ParseStateError::Corrupt)?;
     state.next_koma_seq = saved.next_koma_seq;
     state.next_sheet_seq = saved.next_sheet_seq;
     state.recents = recents;
@@ -198,8 +219,13 @@ pub fn from_json(text: &str) -> Result<WorkspaceState, String> {
     Ok(state)
 }
 
+pub fn from_json(text: &str) -> Result<WorkspaceState, String> {
+    parse_state(text).map_err(ParseStateError::into_message)
+}
+
 /// Loads `state.json`; a missing file yields `None`. A corrupt file is moved to
 /// `state.json.corrupt-<timestamp>` and reported as `Err` so the caller can start fresh.
+/// A valid file with an unsupported schema version is left untouched and reported as `Err`.
 pub fn load(dir: &Path) -> Result<Option<WorkspaceState>, String> {
     let path = dir.join("state.json");
     let text = match std::fs::read_to_string(&path) {
@@ -207,9 +233,10 @@ pub fn load(dir: &Path) -> Result<Option<WorkspaceState>, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
-    match from_json(&text) {
+    match parse_state(&text) {
         Ok(state) => Ok(Some(state)),
-        Err(err) => {
+        Err(err @ ParseStateError::UnsupportedVersion(_)) => Err(err.into_message()),
+        Err(ParseStateError::Corrupt(err)) => {
             let stamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs());
@@ -297,6 +324,28 @@ mod tests {
         assert!(load(&dir).is_err());
         assert!(!dir.join("state.json").exists());
         assert_eq!(load(&dir).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unsupported_version_is_not_quarantined() {
+        let dir = temp_dir("unsupported-version");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut saved = SavedState::deserialize_json(&to_json(&WorkspaceState::new())).unwrap();
+        saved.version = VERSION + 1;
+        let json = saved.serialize_json_pretty();
+        let path = dir.join("state.json");
+        std::fs::write(&path, &json).unwrap();
+
+        let err = load(&dir).unwrap_err();
+        assert_eq!(err, format!("Unsupported state version {}", VERSION + 1));
+        assert!(path.exists());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), json);
+        let entries: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(entries, vec!["state.json"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

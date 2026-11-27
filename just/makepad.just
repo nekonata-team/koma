@@ -35,7 +35,7 @@ build: (cargo "build" "--workspace")
 [no-cd]
 [positional-arguments]
 check *args: _require_dir
-    cargo clippy -p koma-app -p koma-cli -p koma-core -p koma-ipc -p koma-browser-host -p koma-cef-fetch --all-targets --no-deps {{_patch}} "$@" -- -D warnings
+    cargo clippy -p koma-app -p koma-cli -p koma-core -p koma-ipc -p koma-browser-host -p koma-cef-fetch -p xtask --all-targets --no-deps {{_patch}} "$@" -- -D warnings
 
 # ローカルの makepad を参照してテストを実行する
 [no-cd]

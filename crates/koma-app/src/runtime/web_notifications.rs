@@ -4,7 +4,7 @@ use makepad_micro_serde::*;
 const MARK: &str = "__KOMA_WEB_NOTIFICATION__:";
 const SCRIPT: &str = include_str!("../../assets/WebNotifications.js");
 
-pub(super) struct NotificationBridge {
+pub struct NotificationBridge {
     prefix: String,
 }
 
@@ -15,14 +15,14 @@ struct Message {
     body: String,
 }
 
-pub(crate) struct WebNotification {
+pub struct WebNotification {
     pub koma_id: KomaId,
     pub title: String,
     pub body: String,
 }
 
 impl NotificationBridge {
-    pub(super) fn new() -> Result<Self, getrandom::Error> {
+    pub fn new() -> Result<Self, getrandom::Error> {
         let mut bytes = [0; 16];
         getrandom::fill(&mut bytes)?;
         let key = u128::from_ne_bytes(bytes);
@@ -31,18 +31,13 @@ impl NotificationBridge {
         })
     }
 
-    pub(super) fn script(&self) -> String {
+    pub fn script(&self) -> String {
         // Only this view's document-start closure has the key. A console log from an
         // embedded frame must not be able to impersonate the top-level page.
         format!("{SCRIPT}(\"{}\");", self.prefix)
     }
 
-    pub(super) fn receive(
-        &self,
-        koma_id: &KomaId,
-        url: &str,
-        line: &str,
-    ) -> Option<WebNotification> {
+    pub fn receive(&self, koma_id: &KomaId, url: &str, line: &str) -> Option<WebNotification> {
         let payload = line.strip_prefix(&self.prefix)?;
         if payload.len() > 4_096 {
             return None;

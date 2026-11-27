@@ -566,6 +566,15 @@ mod tests {
         }
     }
 
+    fn primary(k: Key) -> KeyStroke {
+        KeyStroke {
+            logo: PRIMARY_IS_LOGO,
+            ctrl: !PRIMARY_IS_LOGO,
+            key: k,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn prompt_captures_escape_and_forwards_typing_and_clipboard_shortcuts() {
         assert_eq!(
@@ -577,26 +586,13 @@ mod tests {
             RouteDecision::Forward
         );
         assert_eq!(
-            route_key(
-                InputMode::ContentInput,
-                true,
-                KeyStroke {
-                    logo: true,
-                    key: Key::T,
-                    ..Default::default()
-                }
-            ),
+            route_key(InputMode::ContentInput, true, primary(Key::T)),
             RouteDecision::Forward
         );
     }
 
     #[test]
     fn primary_zoom_keys_control_content_except_in_overview() {
-        let primary = |key| KeyStroke {
-            logo: PRIMARY_IS_LOGO,
-            ctrl: !PRIMARY_IS_LOGO,
-            ..self::key(key)
-        };
         for mode in [InputMode::ContentInput, InputMode::KomaMode] {
             for (key, step) in [
                 (Key::Equals, 1),
@@ -652,15 +648,7 @@ mod tests {
             RouteDecision::ToggleMode
         );
         assert_eq!(
-            route_key(
-                InputMode::ContentInput,
-                false,
-                KeyStroke {
-                    logo: true,
-                    key: Key::T,
-                    ..Default::default()
-                }
-            ),
+            route_key(InputMode::ContentInput, false, primary(Key::T)),
             RouteDecision::OpenKomaPrompt
         );
         assert_eq!(
@@ -668,10 +656,8 @@ mod tests {
                 InputMode::ContentInput,
                 false,
                 KeyStroke {
-                    logo: true,
                     alt: true,
-                    key: Key::Left,
-                    ..Default::default()
+                    ..primary(Key::Left)
                 }
             ),
             RouteDecision::FocusRelativeKoma(-1)
@@ -681,10 +667,8 @@ mod tests {
                 InputMode::ContentInput,
                 false,
                 KeyStroke {
-                    logo: true,
                     alt: true,
-                    key: Key::Digit(2),
-                    ..Default::default()
+                    ..primary(Key::Digit(2))
                 }
             ),
             RouteDecision::SwitchSheet(1)
@@ -700,11 +684,9 @@ mod tests {
                     InputMode::ContentInput,
                     false,
                     KeyStroke {
-                        logo: true,
                         alt: true,
                         shift: true,
-                        key,
-                        ..Default::default()
+                        ..primary(key)
                     }
                 ),
                 expected
@@ -724,15 +706,7 @@ mod tests {
             RouteDecision::SwitchSheetRelative(-1, true)
         );
         assert_eq!(
-            route_key(
-                InputMode::ContentInput,
-                false,
-                KeyStroke {
-                    logo: true,
-                    key: Key::W,
-                    ..Default::default()
-                }
-            ),
+            route_key(InputMode::ContentInput, false, primary(Key::W)),
             RouteDecision::CloseFocusedKoma
         );
         assert_eq!(
@@ -740,10 +714,8 @@ mod tests {
                 InputMode::ContentInput,
                 false,
                 KeyStroke {
-                    logo: true,
                     shift: true,
-                    key: Key::W,
-                    ..Default::default()
+                    ..primary(Key::W)
                 }
             ),
             RouteDecision::CloseCurrentSheet
@@ -868,10 +840,8 @@ mod tests {
                 InputMode::ContentInput,
                 false,
                 KeyStroke {
-                    logo: true,
                     shift: true,
-                    key: Key::O,
-                    ..Default::default()
+                    ..primary(Key::O)
                 }
             ),
             RouteDecision::ToggleOverview

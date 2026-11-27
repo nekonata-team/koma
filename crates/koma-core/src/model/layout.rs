@@ -29,6 +29,10 @@ impl WorkspaceState {
             }
         }
 
+        let location = |sheet: Option<&SheetId>, position| match sheet {
+            Some(id) => format!("Sheet {id}, item {position}"),
+            None => format!("Drawer, item {position}"),
+        };
         let mut koma_locations = HashMap::new();
         let groups = sheets
             .iter()
@@ -37,13 +41,18 @@ impl WorkspaceState {
         for (sheet_id, komas) in groups {
             for (index, koma) in komas.iter().enumerate() {
                 let position = index + 1;
+                if koma.sheet_id.as_ref() != sheet_id {
+                    return Err(format!(
+                        "Koma {} at {} has mismatched sheet_id {:?} (expected {:?})",
+                        koma.id,
+                        location(sheet_id, position),
+                        koma.sheet_id,
+                        sheet_id
+                    ));
+                }
                 if let Some((first_sheet, first_position)) =
                     koma_locations.insert(&koma.id, (sheet_id, position))
                 {
-                    let location = |sheet: Option<&SheetId>, position| match sheet {
-                        Some(id) => format!("Sheet {id}, item {position}"),
-                        None => format!("Drawer, item {position}"),
-                    };
                     return Err(format!(
                         "Duplicate Koma ID {}: {} and {}",
                         koma.id,
@@ -186,5 +195,25 @@ mod tests {
         let state = WorkspaceState::restore_layout("profile-a".into(), sheets, 1, vec![]).unwrap();
         assert_eq!(state.active_sheet_index(), 1);
         assert_eq!(state.current_sheet().focused_koma_id, None);
+    }
+
+    #[test]
+    fn restore_layout_rejects_mismatched_koma_sheet_id() {
+        let mut sheets = WorkspaceState::poc_default().sheets;
+        sheets[0].komas[0].sheet_id = Some("sheet-2".into());
+        assert!(WorkspaceState::restore_layout("profile-a".into(), sheets, 0, vec![]).is_err());
+
+        let mut sheets = WorkspaceState::poc_default().sheets;
+        sheets[0].komas[0].sheet_id = None;
+        assert!(WorkspaceState::restore_layout("profile-a".into(), sheets, 0, vec![]).is_err());
+
+        let sheets = WorkspaceState::poc_default().sheets;
+        let mut drawer_koma = sheets[0].komas[0].clone();
+        drawer_koma.id = "drawer-1".into();
+        // drawer_koma still has sheet_id = Some("sheet-1"), which is invalid in Drawer
+        assert!(
+            WorkspaceState::restore_layout("profile-a".into(), sheets, 0, vec![drawer_koma])
+                .is_err()
+        );
     }
 }

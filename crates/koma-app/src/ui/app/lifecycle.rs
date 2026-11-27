@@ -188,18 +188,34 @@ impl App {
             .set_default_page_zoom(self.config.scale.web);
         self.web_runtime = Some(Rc::clone(&web_runtime));
 
-        let mut path_env = std::env::var("PATH").unwrap_or_default();
-        if let Some(bin_dir) = std::env::current_exe()
+        let existing_path = std::env::var_os("PATH");
+        self.path_env = match std::env::current_exe()
             .ok()
-            .and_then(|p| p.parent().map(|d| d.display().to_string()))
+            .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
         {
-            path_env = if path_env.is_empty() {
-                bin_dir
-            } else {
-                format!("{bin_dir}:{path_env}")
-            };
-        }
-        self.path_env = path_env;
+            Some(bin_dir) => {
+                let paths = std::iter::once(bin_dir).chain(
+                    existing_path
+                        .as_deref()
+                        .filter(|p| !p.is_empty())
+                        .into_iter()
+                        .flat_map(std::env::split_paths),
+                );
+                std::env::join_paths(paths)
+                    .ok()
+                    .and_then(|p| p.into_string().ok())
+                    .unwrap_or_else(|| {
+                        existing_path
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned()
+                    })
+            }
+            None => existing_path
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+        };
 
         let (terminal_settings, diagnostics) = ghostty_config::load(
             home.as_deref().map(std::path::Path::new),

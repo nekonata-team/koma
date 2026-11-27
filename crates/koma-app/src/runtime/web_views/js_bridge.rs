@@ -2,12 +2,20 @@
 
 use koma_core::model::KomaId;
 use koma_ipc::protocol::{IpcPayload, IpcResponse, WebReadData, WebSnapshotData};
+use koma_ipc::WEB_DOM_JS;
 use makepad_micro_serde::*;
 
-const WEB_DOM_JS: &str = include_str!("../../../assets/WebDOM.js");
 const WEB_READ_JS: &str = include_str!("../../../assets/WebRead.js");
 const WEB_NAVIGATION_JS: &str = include_str!("../../../assets/WebNavigation.js");
 const KOMA_API_JS: &str = include_str!("../../../assets/KomaAPI.js");
+const WEB_NAV_MARK: &str = "__KOMA_WEB_NAV__:";
+const KOMA_API_MARK: &str = "__KOMA_API__:";
+
+pub fn generate_bridge_token() -> Result<String, getrandom::Error> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes)?;
+    Ok(format!("{:032x}", u128::from_ne_bytes(bytes)))
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WebNavEvent {
@@ -144,19 +152,51 @@ pub fn build_koma_scroll_expr(target: &str) -> String {
     )
 }
 
-pub fn build_koma_api_inject_expr() -> String {
+pub fn build_koma_api_inject_expr(token: &str) -> String {
+    let prefix = js_string(&format!("{KOMA_API_MARK}{token}:"));
     format!(
-        "(() => {{\nconst komaAPITransport = {{ postMessage(msg) {{ console.debug('__KOMA_API__:' + JSON.stringify(msg)); return Promise.resolve(); }} }};\n{KOMA_API_JS}\nreturn true;\n}})()"
+        "(() => {{\nif (window.top !== window) return false;\nconst emit = console.debug.bind(console);\nconst stringify = JSON.stringify;\nconst prefix = {prefix};\nconst komaAPITransport = {{ postMessage(msg) {{ emit(prefix + stringify(msg)); return Promise.resolve(); }} }};\n{KOMA_API_JS}\nreturn true;\n}})()"
     )
 }
 
-pub fn build_web_navigation_inject_expr() -> String {
+pub fn build_web_navigation_inject_expr(token: &str) -> String {
+    let prefix = js_string(&format!("{WEB_NAV_MARK}{token}:"));
     format!(
-        "(() => {{\nglobalThis.__komaWebNavTransport = {{ postMessage(msg) {{ console.debug('__KOMA_WEB_NAV__:' + JSON.stringify(msg)); }} }};\n{WEB_NAVIGATION_JS}\nwindow.__komaWebNavigation?.configure({{ enabled: true, alphabet: 'asdfghjkl', reduceMotion: false, ignoredHosts: [], paused: false }});\nreturn true;\n}})()"
+        "(() => {{\nif (window.top !== window) return false;\nconst emit = console.debug.bind(console);\nconst stringify = JSON.stringify;\nconst prefix = {prefix};\nglobalThis.__komaWebNavTransport = {{ postMessage(msg) {{ emit(prefix + stringify(msg)); }} }};\n{WEB_NAVIGATION_JS}\nwindow.__komaWebNavigation?.configure({{ enabled: true, alphabet: 'asdfghjkl', reduceMotion: false, ignoredHosts: [], paused: false }});\nreturn true;\n}})()"
     )
 }
 
-pub(super) fn parse_web_nav_event(koma_id: &KomaId, payload: &str) -> Option<WebNavEvent> {
+pub fn parse_web_nav_console_line(
+    koma_id: &KomaId,
+    token: &str,
+    line: &str,
+) -> Option<WebNavEvent> {
+    if token.is_empty() {
+        return None;
+    }
+    let payload = line
+        .strip_prefix(WEB_NAV_MARK)?
+        .strip_prefix(token)?
+        .strip_prefix(':')?;
+    parse_web_nav_event(koma_id, payload)
+}
+
+pub fn parse_koma_api_console_line(
+    koma_id: &KomaId,
+    token: &str,
+    line: &str,
+) -> Option<KomaApiEvent> {
+    if token.is_empty() {
+        return None;
+    }
+    let payload = line
+        .strip_prefix(KOMA_API_MARK)?
+        .strip_prefix(token)?
+        .strip_prefix(':')?;
+    parse_koma_api_event(koma_id, payload)
+}
+
+fn parse_web_nav_event(koma_id: &KomaId, payload: &str) -> Option<WebNavEvent> {
     let msg = WebNavMessage::deserialize_json(payload).ok()?;
     Some(WebNavEvent {
         koma_id: koma_id.clone(),
@@ -165,7 +205,7 @@ pub(super) fn parse_web_nav_event(koma_id: &KomaId, payload: &str) -> Option<Web
     })
 }
 
-pub(super) fn parse_koma_api_event(koma_id: &KomaId, payload: &str) -> Option<KomaApiEvent> {
+fn parse_koma_api_event(koma_id: &KomaId, payload: &str) -> Option<KomaApiEvent> {
     let msg = KomaApiMessage::deserialize_json(payload).ok()?;
     match msg.action.as_str() {
         "koma.focus" => msg.koma_id.map(|target| KomaApiEvent::FocusKoma {
@@ -253,14 +293,69 @@ mod tests {
             build_koma_fill_expr("input", "hello\nworld"),
             build_koma_press_expr("Enter"),
             build_koma_scroll_expr("down"),
-            build_koma_api_inject_expr(),
-            build_web_navigation_inject_expr(),
+            build_koma_api_inject_expr("0123456789abcdef0123456789abcdef"),
+            build_web_navigation_inject_expr("0123456789abcdef0123456789abcdef"),
         ] {
             let t = expr.trim();
             assert!(!t.ends_with(';'));
             assert!(t.starts_with("(() => {"));
             assert!(t.ends_with("})()"));
         }
+    }
+
+    #[test]
+    fn inject_scripts_enforce_top_window_and_embed_token_prefix() {
+        let token = generate_bridge_token().unwrap();
+        assert_eq!(token.len(), 32);
+        assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+
+        let nav = build_web_navigation_inject_expr(&token);
+        assert!(nav.contains("if (window.top !== window) return false;"));
+        assert!(nav.contains(&format!("\"__KOMA_WEB_NAV__:{token}:\"")));
+
+        let api = build_koma_api_inject_expr(&token);
+        assert!(api.contains("if (window.top !== window) return false;"));
+        assert!(api.contains(&format!("\"__KOMA_API__:{token}:\"")));
+    }
+
+    #[test]
+    fn bridge_token_auth_rejects_forged_or_mismatched_console_lines() {
+        let token = generate_bridge_token().unwrap();
+        let other = generate_bridge_token().unwrap();
+        assert_ne!(token, other);
+
+        let koma_id = KomaId::from("koma-1");
+
+        let nav_payload = r#"{"action":"openKoma","url":"https://example.test/"}"#;
+        let nav_valid = format!("__KOMA_WEB_NAV__:{token}:{nav_payload}");
+        let nav_forged = format!("__KOMA_WEB_NAV__:{nav_payload}");
+        let nav_wrong = format!("__KOMA_WEB_NAV__:{other}:{nav_payload}");
+        assert_eq!(
+            parse_web_nav_console_line(&koma_id, &token, &nav_valid),
+            Some(WebNavEvent {
+                koma_id: koma_id.clone(),
+                action: "openKoma".into(),
+                url: Some("https://example.test/".into()),
+            })
+        );
+        assert!(parse_web_nav_console_line(&koma_id, &token, &nav_forged).is_none());
+        assert!(parse_web_nav_console_line(&koma_id, &token, &nav_wrong).is_none());
+        assert!(parse_web_nav_console_line(&koma_id, "", &nav_forged).is_none());
+
+        let api_payload = r#"{"action":"koma.focus","komaId":"koma-2"}"#;
+        let api_valid = format!("__KOMA_API__:{token}:{api_payload}");
+        let api_forged = format!("__KOMA_API__:{api_payload}");
+        let api_wrong = format!("__KOMA_API__:{other}:{api_payload}");
+        assert_eq!(
+            parse_koma_api_console_line(&koma_id, &token, &api_valid),
+            Some(KomaApiEvent::FocusKoma {
+                caller_koma_id: koma_id.clone(),
+                target_koma_id: KomaId::from("koma-2"),
+            })
+        );
+        assert!(parse_koma_api_console_line(&koma_id, &token, &api_forged).is_none());
+        assert!(parse_koma_api_console_line(&koma_id, &token, &api_wrong).is_none());
+        assert!(parse_koma_api_console_line(&koma_id, "", &api_forged).is_none());
     }
 
     #[test]

@@ -5,17 +5,15 @@ use std::time::{Duration, Instant};
 
 use koma_ipc::protocol::WebScriptTargetData;
 
-const SNAPSHOT_EXPR: &str = concat!(
-    "(() => {\n",
-    include_str!("../../koma-app/assets/WebDOM.js"),
-    "\nreturn window.__komaWebDOM.komaSnapshot();\n})()"
-);
-
 pub(super) fn run(
     file: &Path,
     timeout: NonZeroU64,
     target: WebScriptTargetData,
 ) -> Result<(), String> {
+    let snapshot_expr = format!(
+        "(() => {{\n{}\nreturn window.__komaWebDOM.komaSnapshot();\n}})()",
+        koma_ipc::WEB_DOM_JS
+    );
     let mut child = Command::new("node")
         .args([
             "--input-type=module",
@@ -26,7 +24,7 @@ pub(super) fn run(
         .arg(file)
         .arg(target.port.to_string())
         .arg(target.target_id)
-        .env("KOMA_SCRIPT_SNAPSHOT", SNAPSHOT_EXPR)
+        .env("KOMA_SCRIPT_SNAPSHOT", snapshot_expr)
         .spawn()
         .map_err(|err| format!("Cannot start Node.js for koma web script: {err}"))?;
     let started = Instant::now();

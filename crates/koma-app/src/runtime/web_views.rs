@@ -23,8 +23,8 @@ pub use js_bridge::{
     build_web_navigation_inject_expr, KomaApiEvent, WebNavEvent,
 };
 use js_bridge::{
-    parse_action_response, parse_koma_api_event, parse_read_response, parse_snapshot_response,
-    parse_text_response, parse_web_nav_event,
+    generate_bridge_token, parse_action_response, parse_koma_api_console_line, parse_read_response,
+    parse_snapshot_response, parse_text_response, parse_web_nav_console_line,
 };
 
 const SCRIPT_TARGET_WAIT: Duration = Duration::from_secs(8);
@@ -50,6 +50,29 @@ enum PendingEval {
         koma_id: KomaId,
         reply: mpsc::SyncSender<IpcResponse>,
     },
+}
+
+impl PendingEval {
+    fn koma_id(&self) -> &KomaId {
+        match self {
+            Self::Raw { koma_id, .. }
+            | Self::Snapshot { koma_id, .. }
+            | Self::Read { koma_id, .. }
+            | Self::Text { koma_id, .. }
+            | Self::Action { koma_id, .. } => koma_id,
+        }
+    }
+
+    fn fail(self, msg: impl Into<String>) {
+        let reply = match self {
+            Self::Raw { reply, .. }
+            | Self::Snapshot { reply, .. }
+            | Self::Read { reply, .. }
+            | Self::Text { reply, .. }
+            | Self::Action { reply, .. } => reply,
+        };
+        let _ = reply.send(IpcResponse::err(msg));
+    }
 }
 
 pub fn should_record_url_change(last: Option<&str>, next: &str) -> bool {
@@ -100,6 +123,7 @@ pub struct WebViewRuntime {
     pending_script_targets: Vec<PendingScriptTarget>,
     pending: PendingEvents,
     notification_bridges: HashMap<ViewId, NotificationBridge>,
+    bridge_tokens: HashMap<ViewId, String>,
     default_page_zoom: f64,
     last_size: Option<(Vec2d, f64)>,
     last_event: Option<(u64, bool)>,
@@ -117,6 +141,7 @@ impl WebViewRuntime {
             pending_script_targets: Vec::new(),
             pending: PendingEvents::default(),
             notification_bridges: HashMap::new(),
+            bridge_tokens: HashMap::new(),
             default_page_zoom: 1.0,
             last_size: None,
             last_event: None,
@@ -174,6 +199,58 @@ impl WebViewRuntime {
             .and_then(|id| self.koma_to_view.get(id).copied())
     }
 
+    fn new_view_bridges() -> (Option<NotificationBridge>, Option<String>) {
+        let bridge = NotificationBridge::new()
+            .map_err(|err| {
+                eprintln!("Could not initialize Web notifications: {err}");
+            })
+            .ok();
+        let token = generate_bridge_token()
+            .map_err(|err| {
+                eprintln!("Could not initialize JS bridge token: {err}");
+            })
+            .ok();
+        (bridge, token)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn register_view(
+        &mut self,
+        cx: &mut Cx,
+        koma_id: &KomaId,
+        id: ViewId,
+        url: &str,
+        visible: bool,
+        size: Vec2d,
+        dpi: f64,
+        bridge: Option<NotificationBridge>,
+        token: Option<String>,
+    ) {
+        if let Some(bridge) = bridge {
+            self.notification_bridges.insert(id, bridge);
+        }
+        if let Some(token) = token {
+            self.bridge_tokens.insert(id, token);
+        }
+        self.koma_to_view.insert(koma_id.clone(), id);
+        self.view_to_koma.insert(id, koma_id.clone());
+        let state = self.koma_states.entry(koma_id.clone()).or_default();
+        state.size = Some((size, dpi));
+        state.hidden = Some(!visible);
+        state.last_observed_url = Some(url.to_string());
+        self.views.set_size(id, size, dpi);
+        self.views.send(id, ViewOp::Hidden { on: !visible });
+        if self.default_page_zoom != 1.0 {
+            self.views.send(
+                id,
+                ViewOp::PageZoom {
+                    factor: self.default_page_zoom,
+                },
+            );
+        }
+        self.views.service(cx);
+    }
+
     pub fn ensure_koma(
         &mut self,
         cx: &mut Cx,
@@ -186,42 +263,21 @@ impl WebViewRuntime {
         if let Some(id) = self.koma_to_view.get(koma_id).copied() {
             return Some(id);
         }
-        let bridge = NotificationBridge::new()
-            .map_err(|err| {
-                eprintln!("Could not initialize Web notifications: {err}");
-            })
-            .ok();
+        let (bridge, token) = Self::new_view_bridges();
         let mut document_script = String::new();
         if let Some(bridge) = bridge.as_ref() {
             document_script.push_str(&bridge.script());
             document_script.push('\n');
         }
-        document_script.push_str(&build_web_navigation_inject_expr());
-        document_script.push(';');
+        if let Some(token) = token.as_deref() {
+            document_script.push_str(&build_web_navigation_inject_expr(token));
+            document_script.push(';');
+        }
         let id =
             self.views
                 .open_with_document_script(url, true, 0xff10_1521, Some(document_script))?;
-        if let Some(bridge) = bridge {
-            self.notification_bridges.insert(id, bridge);
-        }
-        self.koma_to_view.insert(koma_id.clone(), id);
-        self.view_to_koma.insert(id, koma_id.clone());
-        let state = self.koma_states.entry(koma_id.clone()).or_default();
-        state.size = Some((size, dpi));
-        state.hidden = Some(!visible);
-        state.last_observed_url = Some(url.to_string());
         self.last_size = Some((size, dpi));
-        self.views.set_size(id, size, dpi);
-        self.views.send(id, ViewOp::Hidden { on: !visible });
-        if self.default_page_zoom != 1.0 {
-            self.views.send(
-                id,
-                ViewOp::PageZoom {
-                    factor: self.default_page_zoom,
-                },
-            );
-        }
-        self.views.service(cx);
+        self.register_view(cx, koma_id, id, url, visible, size, dpi, bridge, token);
         Some(id)
     }
 
@@ -235,11 +291,23 @@ impl WebViewRuntime {
                 .send(IpcResponse::err(format!("Web Koma closed: {koma_id}")));
             false
         });
+        let eval_ids: Vec<u64> = self
+            .pending_evals
+            .iter()
+            .filter(|(_, pending)| pending.koma_id() == koma_id)
+            .map(|(&eval_id, _)| eval_id)
+            .collect();
+        for eval_id in eval_ids {
+            if let Some(pending) = self.pending_evals.remove(&eval_id) {
+                pending.fail(format!("Web Koma closed: {koma_id}"));
+            }
+        }
         let Some(id) = self.koma_to_view.remove(koma_id) else {
             return;
         };
         self.view_to_koma.remove(&id);
         self.notification_bridges.remove(&id);
+        self.bridge_tokens.remove(&id);
         self.koma_states.remove(koma_id);
         if self.focused_koma.as_ref() == Some(koma_id) {
             self.focused_koma = None;
@@ -513,22 +581,18 @@ impl WebViewRuntime {
     }
 
     pub fn bind_popup_view(&mut self, cx: &mut Cx, koma_id: &KomaId, view_id: ViewId, url: &str) {
-        self.koma_to_view.insert(koma_id.clone(), view_id);
-        self.view_to_koma.insert(view_id, koma_id.clone());
         let (size, dpi) = self.last_size.unwrap_or((dvec2(640.0, 680.0), 2.0));
-        let state = self.koma_states.entry(koma_id.clone()).or_default();
-        state.size = Some((size, dpi));
-        state.hidden = Some(false);
-        state.last_observed_url = Some(url.to_string());
-        self.views.set_size(view_id, size, dpi);
-        self.views.send(view_id, ViewOp::Hidden { on: false });
-        if self.default_page_zoom != 1.0 {
-            self.views.send(
-                view_id,
-                ViewOp::PageZoom {
-                    factor: self.default_page_zoom,
-                },
-            );
+        let (bridge, token) = Self::new_view_bridges();
+        let notif_script = bridge
+            .as_ref()
+            .map(|b| b.script().trim().trim_end_matches(';').to_string());
+        let nav_script = token.as_deref().map(build_web_navigation_inject_expr);
+        self.register_view(cx, koma_id, view_id, url, true, size, dpi, bridge, token);
+        if let Some(expr) = notif_script {
+            self.views.evaluate(view_id, &expr);
+        }
+        if let Some(expr) = nav_script {
+            self.views.evaluate(view_id, &expr);
         }
         self.views.service(cx);
     }
@@ -770,19 +834,23 @@ impl WebViewRuntime {
                             changed = true;
                         }
                         if state.web_nav_injected_epoch != Some(epoch) {
-                            state.web_nav_injected_epoch = Some(epoch);
-                            let expr = build_web_navigation_inject_expr();
-                            self.views.evaluate(id, &expr);
-                            self.views.service(cx);
+                            if let Some(token) = self.bridge_tokens.get(&id) {
+                                state.web_nav_injected_epoch = Some(epoch);
+                                let expr = build_web_navigation_inject_expr(token);
+                                self.views.evaluate(id, &expr);
+                                self.views.service(cx);
+                            }
                         }
                         if state.koma_api_enabled
                             && is_local_html_url(&url)
                             && state.koma_api_injected_url.as_deref() != Some(url.as_str())
                         {
-                            state.koma_api_injected_url = Some(url);
-                            let expr = build_koma_api_inject_expr();
-                            self.views.evaluate(id, &expr);
-                            self.views.service(cx);
+                            if let Some(token) = self.bridge_tokens.get(&id) {
+                                state.koma_api_injected_url = Some(url);
+                                let expr = build_koma_api_inject_expr(token);
+                                self.views.evaluate(id, &expr);
+                                self.views.service(cx);
+                            }
                         }
                     }
                 }
@@ -793,6 +861,7 @@ impl WebViewRuntime {
                 .get(&id)
                 .zip(koma_id_opt.as_ref())
                 .zip(self.views.state(id));
+            let bridge_source = self.bridge_tokens.get(&id).zip(koma_id_opt.as_ref());
             for line in console {
                 if let Some(notification) =
                     notification_source.and_then(|((bridge, koma), state)| {
@@ -802,34 +871,28 @@ impl WebViewRuntime {
                     self.pending.web_notifications.push(notification);
                     continue;
                 }
-                if let Some(payload) = line.message.strip_prefix("__KOMA_WEB_NAV__:") {
-                    if let Some(ev) = koma_id_opt
-                        .as_ref()
-                        .and_then(|koma_id| parse_web_nav_event(koma_id, payload))
-                    {
+                if let Some((token, koma_id)) = bridge_source {
+                    if let Some(ev) = parse_web_nav_console_line(koma_id, token, &line.message) {
                         self.pending.web_nav.push(ev);
                         changed = true;
+                        continue;
                     }
-                    continue;
-                }
-                if let Some(payload) = line.message.strip_prefix("__KOMA_API__:") {
-                    if let Some(koma_id) = &koma_id_opt {
-                        let allowed = self
-                            .koma_states
-                            .get(koma_id)
-                            .is_some_and(|s| s.koma_api_enabled)
-                            && self
-                                .views
-                                .state(id)
-                                .is_some_and(|s| is_local_html_url(&s.url));
-                        if allowed {
-                            if let Some(ev) = parse_koma_api_event(koma_id, payload) {
-                                self.pending.koma_api.push(ev);
-                                changed = true;
-                            }
+                    let api_allowed = self
+                        .koma_states
+                        .get(koma_id)
+                        .is_some_and(|s| s.koma_api_enabled)
+                        && self
+                            .views
+                            .state(id)
+                            .is_some_and(|s| is_local_html_url(&s.url));
+                    if api_allowed {
+                        if let Some(ev) = parse_koma_api_console_line(koma_id, token, &line.message)
+                        {
+                            self.pending.koma_api.push(ev);
+                            changed = true;
+                            continue;
                         }
                     }
-                    continue;
                 }
             }
             for (eval_id, result) in self.views.take_evaluations(id) {
@@ -852,17 +915,8 @@ impl WebViewRuntime {
                     (Some(PendingEval::Action { koma_id, reply }), Ok(val)) => {
                         let _ = reply.send(parse_action_response(koma_id, &val));
                     }
-                    (
-                        Some(
-                            PendingEval::Raw { reply, .. }
-                            | PendingEval::Snapshot { reply, .. }
-                            | PendingEval::Read { reply, .. }
-                            | PendingEval::Text { reply, .. }
-                            | PendingEval::Action { reply, .. },
-                        ),
-                        Err(err),
-                    ) => {
-                        let _ = reply.send(IpcResponse::err(err));
+                    (Some(pending), Err(err)) => {
+                        pending.fail(err);
                     }
                     (_, Ok(_)) => {}
                     (_, Err(err)) => {
@@ -958,7 +1012,11 @@ impl WebViewRuntime {
         self.koma_to_view.clear();
         self.view_to_koma.clear();
         self.koma_states.clear();
-        self.pending_evals.clear();
+        self.notification_bridges.clear();
+        self.bridge_tokens.clear();
+        for (_, pending) in self.pending_evals.drain() {
+            pending.fail("Browser host is shutting down");
+        }
         for pending in self.pending_script_targets.drain(..) {
             let _ = pending
                 .reply
