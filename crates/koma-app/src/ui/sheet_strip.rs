@@ -444,6 +444,10 @@ pub struct SheetStrip {
     anim: StripAnimation,
     #[rust]
     overview: OverviewState,
+    #[rust]
+    pending_captures: Vec<widgets::PendingCaptureRequest>,
+    #[rust]
+    in_flight_captures: Vec<widgets::InFlightCapture>,
 }
 
 impl SheetStrip {
@@ -572,8 +576,13 @@ impl Widget for SheetStrip {
             for widget in self.koma_widgets.values_mut() {
                 widget.as_widget_mut().handle_event(cx, event, scope);
             }
-            if matches!(event, Event::Signal) && self.is_overview_rendered() {
-                self.redraw(cx);
+            if matches!(event, Event::Signal) {
+                self.poll_in_flight_captures(cx);
+                if self.is_overview_rendered() {
+                    self.redraw(cx);
+                }
+            } else {
+                self.fail_all_captures("Application shutting down");
             }
             return;
         }
@@ -651,6 +660,7 @@ impl Widget for SheetStrip {
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
         let outer_rect = cx.peek_walk_turtle(walk);
         self.last_viewport = outer_rect;
+        self.process_pending_captures(cx, scope, outer_rect);
         self.draw_strip_bg.draw_abs(cx, outer_rect);
 
         if self.is_overview_rendered() {

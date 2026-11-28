@@ -10,6 +10,7 @@ use koma_app::ghostty_config::{CellHeight, TerminalSettings};
 use koma_core::model::{InputMode, Koma, KomaContent, KomaId, SheetId, WorkspaceState};
 use makepad_app_terminal::term::color::Rgb;
 use makepad_app_terminal::widget::{MpTerm, TerminalColors};
+use makepad_widgets::makepad_platform::os::{ReadbackRequest, ReadbackTicket};
 use makepad_widgets::*;
 
 use crate::runtime::web_views::WebViewRuntime;
@@ -787,6 +788,159 @@ impl SheetStrip {
             .get(koma_id)
             .and_then(KomaWidget::terminal_mut)
             .is_some_and(|mut term| term.ai_type_bytes(text.as_bytes()))
+    }
+}
+
+pub(super) type CaptureCallback = Box<dyn FnOnce(Result<(u32, u32, Vec<u8>), String>) + Send>;
+
+pub(super) struct PendingCaptureRequest {
+    koma_id: KomaId,
+    on_done: CaptureCallback,
+}
+
+pub(super) struct InFlightCapture {
+    ticket: ReadbackTicket,
+    _pass: DrawPass,
+    _draw_list: DrawList2d,
+    _texture: Texture,
+    on_done: CaptureCallback,
+}
+
+impl SheetStrip {
+    pub fn queue_terminal_capture(
+        &mut self,
+        cx: &mut Cx,
+        koma_id: KomaId,
+        on_done: CaptureCallback,
+    ) -> Result<(), String> {
+        let ready = self
+            .koma_widgets
+            .get(&koma_id)
+            .is_some_and(KomaWidget::is_terminal);
+        if !ready {
+            return Err(format!("Terminal not ready: {koma_id}"));
+        }
+        self.pending_captures
+            .push(PendingCaptureRequest { koma_id, on_done });
+        self.redraw(cx);
+        Ok(())
+    }
+
+    pub(super) fn process_pending_captures(
+        &mut self,
+        cx: &mut Cx2d,
+        scope: &mut Scope,
+        outer_rect: Rect,
+    ) {
+        if self.pending_captures.is_empty() {
+            return;
+        }
+        let pending = std::mem::take(&mut self.pending_captures);
+        let fallback_h = (outer_rect.size.y - 2.0 * self.koma_gap - super::HEADER_HEIGHT).max(40.0);
+        for req in pending {
+            let slot_w = self
+                .sheets
+                .iter()
+                .flat_map(|s| s.komas.iter())
+                .find(|k| k.koma_id == req.koma_id)
+                .map(|k| k.width);
+            let Some(widget) = self
+                .koma_widgets
+                .get_mut(&req.koma_id)
+                .filter(|w| w.is_terminal())
+            else {
+                (req.on_done)(Err(format!("Terminal not ready: {}", req.koma_id)));
+                continue;
+            };
+            let area = widget.as_widget().area();
+            let area_rect = area.rect(cx);
+            let size = if area_rect.size.x > 1.0 && area_rect.size.y > 1.0 {
+                area_rect.size
+            } else {
+                dvec2(slot_w.unwrap_or(600.0).max(40.0), fallback_h)
+            };
+            let dpi = if area_rect.size.x > 1.0 {
+                cx.get_dpi_factor_of(&area)
+            } else {
+                cx.current_dpi_factor()
+            };
+            let px_w = (size.x * dpi).round().max(1.0) as usize;
+            let px_h = (size.y * dpi).round().max(1.0) as usize;
+            let texture = Texture::new_with_format(
+                cx,
+                TextureFormat::RenderBGRAu8 {
+                    size: TextureSize::Fixed {
+                        width: px_w,
+                        height: px_h,
+                    },
+                    initial: true,
+                },
+            );
+            let pass = DrawPass::new(cx);
+            let mut draw_list = DrawList2d::new(cx);
+            pass.set_size(cx, size);
+            pass.set_color_texture(
+                cx,
+                &texture,
+                DrawPassClearColor::ClearWith(vec4(0.0, 0.0, 0.0, 1.0)),
+            );
+            cx.make_child_pass(&pass);
+            cx.begin_pass(&pass, Some(dpi));
+            draw_list.begin_always(cx);
+            cx.begin_root_turtle(size, Layout::default());
+            let _ =
+                widget
+                    .as_widget_mut()
+                    .draw_walk(cx, scope, Walk::new(Size::fill(), Size::fill()));
+            cx.end_pass_sized_turtle();
+            draw_list.end(cx);
+            cx.end_pass(&pass);
+            match texture.read_back(cx, ReadbackRequest { next_render: true }) {
+                Ok(ticket) => {
+                    self.in_flight_captures.push(InFlightCapture {
+                        ticket,
+                        _pass: pass,
+                        _draw_list: draw_list,
+                        _texture: texture,
+                        on_done: req.on_done,
+                    });
+                }
+                Err(err) => {
+                    (req.on_done)(Err(format!("Failed to read back terminal texture: {err}")));
+                }
+            }
+        }
+    }
+
+    pub(super) fn poll_in_flight_captures(&mut self, cx: &mut Cx) {
+        if self.in_flight_captures.is_empty() {
+            return;
+        }
+        let tickets: Vec<ReadbackTicket> =
+            self.in_flight_captures.iter().map(|c| c.ticket).collect();
+        for rb in cx.try_take_texture_readbacks_for(&tickets) {
+            if let Some(pos) = self
+                .in_flight_captures
+                .iter()
+                .position(|c| c.ticket == rb.ticket)
+            {
+                let cap = self.in_flight_captures.swap_remove(pos);
+                let result = rb
+                    .data
+                    .map(|data| (rb.width as u32, rb.height as u32, data.to_vec()))
+                    .map_err(|err| format!("Terminal capture readback failed: {err}"));
+                (cap.on_done)(result);
+            }
+        }
+    }
+
+    pub(super) fn fail_all_captures(&mut self, msg: &str) {
+        for req in self.pending_captures.drain(..) {
+            (req.on_done)(Err(msg.to_string()));
+        }
+        for cap in self.in_flight_captures.drain(..) {
+            (cap.on_done)(Err(msg.to_string()));
+        }
     }
 
     pub fn with_terminal<T>(

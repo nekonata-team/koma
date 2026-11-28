@@ -199,6 +199,7 @@ fn print_ipc_payload(payload: IpcPayload, is_health: bool) -> Result<(), String>
         IpcPayload::WebScriptTarget(_) => return Err("Unexpected Web Koma script target".into()),
         IpcPayload::WebRead(data) => println!("{}", data.markdown.unwrap_or_default()),
         IpcPayload::Text { text, .. } => println!("{text}"),
+        IpcPayload::TerminalScreenshot { path, .. } => println!("{path}"),
         IpcPayload::DrawerList { items } => {
             for item in items {
                 let (kind, detail) = match item.content {

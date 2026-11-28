@@ -7,6 +7,7 @@ edition = "2021"
 koma-core = { path = "../koma-core" }
 koma-ipc = { path = "../koma-ipc" }
 makepad-widgets.workspace = true
+makepad-zune-png.workspace = true
 makepad-browser-view.workspace = true
 makepad-app-terminal.workspace = true
 makepad-micro-serde.workspace = true

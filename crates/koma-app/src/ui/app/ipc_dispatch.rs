@@ -1,6 +1,8 @@
 //! IPC request dispatch for `App` (runs on the UI thread via `SignalToUI`).
 
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::SyncSender;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use koma_app::domain::sheet_presets::available_sheet_presets;
 use koma_core::input::{
@@ -12,12 +14,16 @@ use koma_ipc::protocol::{
     IpcResponse, KomaCommand, KomaFocusedData, KomaPlacement, KomaSummary, KomaSummaryContent,
     KomaTarget, KomaTextArgs, NotificationCommand, NotificationListArgs, NotificationSendArgs,
     NotificationSummary, PresetSummary, SheetCloseArgs, SheetCommand, SheetListEntry, SheetSummary,
-    TerminalCommand, TerminalNewArgs, TerminalTextArgs, WebClickArgs, WebCommand, WebEvalArgs,
-    WebFillArgs, WebKomaData, WebNavigateArgs, WebNewArgs, WebReadArgs, WebReloadArgs,
-    WebSnapshotArgs, WorkspaceCommand, WorkspaceEndpoint,
+    TerminalCommand, TerminalNewArgs, TerminalScreenshotArgs, TerminalTextArgs, WebClickArgs,
+    WebCommand, WebEvalArgs, WebFillArgs, WebKomaData, WebNavigateArgs, WebNewArgs, WebReadArgs,
+    WebReloadArgs, WebSnapshotArgs, WorkspaceCommand, WorkspaceEndpoint,
 };
 use makepad_app_terminal::widget::MpTerm;
 use makepad_widgets::*;
+use makepad_zune_png::{
+    makepad_zune_core::{bit_depth::BitDepth, colorspace::ColorSpace, options::EncoderOptions},
+    PngEncoder,
+};
 
 use super::{derive_cwd_label, home_dir_string, latest_web_url_with, App};
 use crate::runtime::ipc_server::PendingIpc;
@@ -87,9 +93,7 @@ impl App {
             IpcCommand::Koma(cmd) => send_result(reply, self.dispatch_koma(cx, cmd, caller)),
             IpcCommand::Sheet(cmd) => send_result(reply, self.dispatch_sheet(cx, cmd)),
             IpcCommand::Web(cmd) => self.dispatch_web(cx, cmd, caller, reply),
-            IpcCommand::Terminal(cmd) => {
-                send_result(reply, self.dispatch_terminal(cx, cmd, caller));
-            }
+            IpcCommand::Terminal(cmd) => self.dispatch_terminal(cx, cmd, caller, reply),
             IpcCommand::Drawer(cmd) => send_result(reply, self.dispatch_drawer(cx, cmd)),
             IpcCommand::Notification(cmd) => {
                 send_result(reply, self.dispatch_notification(cx, cmd, caller));
@@ -521,8 +525,24 @@ impl App {
         cx: &mut Cx,
         cmd: TerminalCommand,
         caller: Option<&KomaId>,
+        reply: IpcReply,
+    ) {
+        if let TerminalCommand::Screenshot(TerminalScreenshotArgs { koma_id, path }) = cmd {
+            self.dispatch_terminal_screenshot(cx, koma_id, path, caller, reply);
+            return;
+        }
+        let result = self.dispatch_terminal_sync(cx, cmd, caller);
+        send_result(reply, result);
+    }
+
+    fn dispatch_terminal_sync(
+        &mut self,
+        cx: &mut Cx,
+        cmd: TerminalCommand,
+        caller: Option<&KomaId>,
     ) -> Result<IpcPayload, String> {
         match cmd {
+            TerminalCommand::Screenshot(_) => unreachable!(),
             TerminalCommand::New(TerminalNewArgs {
                 cwd,
                 run,
@@ -612,6 +632,70 @@ impl App {
                 Ok(IpcPayload::KomaId {
                     koma_id: koma_id.into_string(),
                 })
+            }
+        }
+    }
+
+    fn dispatch_terminal_screenshot(
+        &mut self,
+        cx: &mut Cx,
+        koma_id: Option<String>,
+        path: Option<String>,
+        caller: Option<&KomaId>,
+        reply: IpcReply,
+    ) {
+        let koma_id = match self
+            .state
+            .resolve_terminal(koma_id.map(KomaId::from).as_ref(), caller)
+        {
+            Ok(koma) => koma.id.clone(),
+            Err(err) => return send_result(reply, Err(err)),
+        };
+        let dest = match path {
+            Some(p) => PathBuf::from(p),
+            None => {
+                let ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                std::env::temp_dir().join(format!("koma-{koma_id}-{ms}.png"))
+            }
+        };
+        let koma_id_str = koma_id.clone().into_string();
+        let reply_slot = std::sync::Arc::new(std::sync::Mutex::new(Some(reply)));
+        let reply_cb = std::sync::Arc::clone(&reply_slot);
+        let queued = self.with_strip_mut(cx, |strip, cx| {
+            strip.queue_terminal_capture(
+                cx,
+                koma_id,
+                Box::new(move |result| {
+                    let Some(reply) = reply_cb.lock().unwrap().take() else {
+                        return;
+                    };
+                    std::thread::spawn(move || {
+                        let res = result.and_then(|(w, h, rgba)| {
+                            write_png_file(&dest, w, h, &rgba)?;
+                            Ok(IpcPayload::TerminalScreenshot {
+                                koma_id: koma_id_str,
+                                path: dest.to_string_lossy().into_owned(),
+                            })
+                        });
+                        send_result(reply, res);
+                    });
+                }),
+            )
+        });
+        match queued {
+            Some(Ok(())) => cx.redraw_all(),
+            Some(Err(err)) => {
+                if let Some(reply) = reply_slot.lock().unwrap().take() {
+                    send_result(reply, Err(err));
+                }
+            }
+            None => {
+                if let Some(reply) = reply_slot.lock().unwrap().take() {
+                    send_result(reply, Err("Sheet Strip unavailable".into()));
+                }
             }
         }
     }
@@ -925,6 +1009,24 @@ impl App {
             .resolve_web(koma_id.map(KomaId::from).as_ref(), caller_koma_id)
             .map(|b| b.id.clone())
     }
+}
+
+fn write_png_file(dest: &Path, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
+    if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
+    }
+    let options = EncoderOptions::default()
+        .set_width(width as usize)
+        .set_height(height as usize)
+        .set_depth(BitDepth::Eight)
+        .set_colorspace(ColorSpace::RGBA);
+    let mut png = Vec::new();
+    PngEncoder::new(rgba, options)
+        .encode(&mut png)
+        .map_err(|e| format!("Failed to encode PNG: {e:?}"))?;
+    std::fs::write(dest, &png)
+        .map_err(|e| format!("Failed to write screenshot to {}: {e}", dest.display()))
 }
 
 #[cfg(test)]

@@ -207,6 +207,7 @@ dependencies = [
  "makepad-platform",
  "makepad-studio-protocol",
  "makepad-widgets",
+ "makepad-zune-png",
  "toml",
 ]
 

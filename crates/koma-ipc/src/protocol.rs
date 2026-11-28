@@ -85,6 +85,12 @@ pub struct KomaTextArgs {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, SerJson, DeJson)]
+pub struct TerminalScreenshotArgs {
+    pub koma_id: Option<String>,
+    pub path: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, SerJson, DeJson)]
 pub struct TerminalNewArgs {
     pub cwd: Option<String>,
     pub run: Option<String>,
@@ -213,6 +219,7 @@ pub enum WebCommand {
 pub enum TerminalCommand {
     New(TerminalNewArgs),
     Text(TerminalTextArgs),
+    Screenshot(TerminalScreenshotArgs),
     Send(KomaTextArgs),
     Run(KomaTextArgs),
     Press(KomaTextArgs),
@@ -410,6 +417,10 @@ pub enum IpcPayload {
         koma_id: String,
         text: String,
     },
+    TerminalScreenshot {
+        koma_id: String,
+        path: String,
+    },
     DrawerList {
         items: Vec<DrawerItemSummary>,
     },
@@ -602,6 +613,13 @@ mod tests {
                 koma_id: Some("t-1".into()),
                 lines: Some(50),
             })),
+            IpcCommand::Terminal(TerminalCommand::Screenshot(
+                TerminalScreenshotArgs::default(),
+            )),
+            IpcCommand::Terminal(TerminalCommand::Screenshot(TerminalScreenshotArgs {
+                koma_id: Some("t-1".into()),
+                path: Some("/tmp/term.png".into()),
+            })),
             IpcCommand::Terminal(TerminalCommand::Send(KomaTextArgs {
                 koma_id: None,
                 text: "echo hi".into(),
@@ -711,6 +729,7 @@ mod tests {
                 IpcCommand::Terminal(c) => match c {
                     TerminalCommand::New(_)
                     | TerminalCommand::Text(_)
+                    | TerminalCommand::Screenshot(_)
                     | TerminalCommand::Send(_)
                     | TerminalCommand::Run(_)
                     | TerminalCommand::Press(_)
@@ -880,6 +899,10 @@ mod tests {
                 koma_id: "t-1".into(),
                 text: "hello\nworld".into(),
             },
+            IpcPayload::TerminalScreenshot {
+                koma_id: "t-1".into(),
+                path: "/tmp/term.png".into(),
+            },
             IpcPayload::DrawerList {
                 items: vec![
                     DrawerItemSummary {
@@ -938,6 +961,7 @@ mod tests {
                 | IpcPayload::WebScriptTarget(_)
                 | IpcPayload::WebRead(_)
                 | IpcPayload::Text { .. }
+                | IpcPayload::TerminalScreenshot { .. }
                 | IpcPayload::DrawerList { .. }
                 | IpcPayload::NotificationSent { .. }
                 | IpcPayload::NotificationList { .. }

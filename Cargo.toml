@@ -31,3 +31,4 @@ makepad-micro-serde = { git = "https://github.com/tyPhoon-collab/makepad", rev =
 makepad-platform = { git = "https://github.com/tyPhoon-collab/makepad", rev = "29b8b61aa579bf93b0dc8463ae5a51d981b93e7d" }
 makepad-studio-protocol = { git = "https://github.com/tyPhoon-collab/makepad", rev = "29b8b61aa579bf93b0dc8463ae5a51d981b93e7d" }
 makepad-widgets = { git = "https://github.com/tyPhoon-collab/makepad", rev = "29b8b61aa579bf93b0dc8463ae5a51d981b93e7d" }
+makepad-zune-png = { git = "https://github.com/tyPhoon-collab/makepad", rev = "29b8b61aa579bf93b0dc8463ae5a51d981b93e7d" }

@@ -6,8 +6,8 @@ use koma_ipc::protocol::{
     DrawerCommand, DrawerKeepArgs, IpcCommand, IpcRequest, KomaCommand, KomaListArgs,
     KomaPlacement, KomaTarget, KomaTextArgs, NotificationCommand, NotificationListArgs,
     NotificationSendArgs, SheetCloseArgs, SheetCommand, TerminalCommand, TerminalNewArgs,
-    TerminalTextArgs, WebClickArgs, WebCommand, WebEvalArgs, WebFillArgs, WebNavigateArgs,
-    WebNewArgs, WebReadArgs, WebReloadArgs, WebSnapshotArgs, WorkspaceCommand,
+    TerminalScreenshotArgs, TerminalTextArgs, WebClickArgs, WebCommand, WebEvalArgs, WebFillArgs,
+    WebNavigateArgs, WebNewArgs, WebReadArgs, WebReloadArgs, WebSnapshotArgs, WorkspaceCommand,
 };
 
 fn parse_non_empty(raw: &str) -> Result<String, String> {
@@ -399,6 +399,13 @@ enum Terminal {
         #[arg(long)]
         lines: Option<NonZeroUsize>,
     },
+    /// Save a PNG screenshot of a Terminal Koma.
+    Screenshot {
+        #[command(flatten)]
+        target: OptionalKoma,
+        /// Destination file path (defaults to a temporary PNG file).
+        path: Option<PathBuf>,
+    },
     /// Send text to a Terminal Koma. Use `--` before text starting with a hyphen.
     Send {
         #[command(flatten)]
@@ -719,6 +726,24 @@ impl Args {
                     lines: lines.map(NonZeroUsize::get),
                 }))
             }
+            Command::Terminal(Terminal::Screenshot { target, path }) => {
+                let path = path
+                    .map(|p| {
+                        if p.is_absolute() {
+                            Ok(p)
+                        } else {
+                            std::env::current_dir()
+                                .map(|cwd| cwd.join(p))
+                                .map_err(|e| format!("Failed to resolve current directory: {e}"))
+                        }
+                    })
+                    .transpose()?
+                    .map(|p| p.to_string_lossy().into_owned());
+                IpcCommand::Terminal(TerminalCommand::Screenshot(TerminalScreenshotArgs {
+                    koma_id: target.koma,
+                    path,
+                }))
+            }
             Command::Terminal(Terminal::Send { target, text }) => {
                 IpcCommand::Terminal(TerminalCommand::Send(KomaTextArgs {
                     koma_id: target.koma,
@@ -1033,7 +1058,7 @@ mod tests {
 
         let shot = parse(&["web", "screenshot", "--koma", "koma-2", "/tmp/out.png"])
             .unwrap()
-            .into_action(env)
+            .into_action(env.clone())
             .unwrap();
         assert_eq!(
             shot,
@@ -1047,6 +1072,23 @@ mod tests {
                 },
                 output: Some(PathBuf::from("/tmp/out.png")),
             }
+        );
+        let term_shot = parse(&["terminal", "screenshot", "--koma", "t-2", "/tmp/term.png"])
+            .unwrap()
+            .into_action(env)
+            .unwrap();
+        assert_eq!(
+            term_shot,
+            CliAction::Ipc(IpcRequest {
+                caller_koma_id: Some("caller-1".into()),
+                profile_id: Some("work".into()),
+                command: IpcCommand::Terminal(TerminalCommand::Screenshot(
+                    TerminalScreenshotArgs {
+                        koma_id: Some("t-2".into()),
+                        path: Some("/tmp/term.png".into()),
+                    }
+                )),
+            })
         );
         assert!(parse(&["web", "new", "https://example.com", "--width", "0"]).is_err());
         assert!(parse(&["terminal", "new", "--left-of", "k1", "--end-of", "s1"]).is_err());
