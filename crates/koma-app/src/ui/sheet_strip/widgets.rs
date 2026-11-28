@@ -580,7 +580,11 @@ impl SheetStrip {
                             .collect(),
                         background_opacity: settings.background_opacity,
                     });
-                    term.cwd = koma.cwd.as_deref().map(PathBuf::from);
+                    term.cwd = koma
+                        .cwd
+                        .as_deref()
+                        .map(PathBuf::from)
+                        .or_else(koma_ipc::workspaces::home_dir);
                     term.shell = self.terminal_shell.clone();
                     term.command = koma.command.clone();
                     term.copy_on_select = settings.copy_on_select;
