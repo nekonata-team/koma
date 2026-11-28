@@ -10,6 +10,7 @@ type Res<T = ()> = Result<T, Box<dyn Error>>;
 
 const DEFAULT_IDENTITY: &str = "Developer ID Application: nekonata, Inc. (F79C2UJ844)";
 const DEFAULT_NOTARY: &str = "koma-notary";
+const APP_ICON: &str = "crates/koma-app/resources/icon_1024.png";
 const ENTITLEMENTS: &str = "crates/koma-app/macos/entitlements.plist";
 const INFO_PLIST: &str = "crates/koma-app/macos/Info.plist";
 const RELEASE_FILES: [&str; 4] = ["Cargo.toml", "Cargo.lock", INFO_PLIST, "flake.nix"];
@@ -58,9 +59,12 @@ fn main() -> ExitCode {
         .as_slice()
     {
         ["macos"] => cmd_macos(&cfg),
+        ["icns", src, dst] => build_icns(Path::new(src), Path::new(dst)),
         ["prepare", ver] => cmd_prepare(&cfg, ver),
         ["publish", ver] => cmd_publish(&cfg, ver),
-        _ => Err("Usage: xtask <macos|prepare <version>|publish <version>>".into()),
+        _ => {
+            Err("Usage: xtask <macos|icns <src> <dst>|prepare <version>|publish <version>>".into())
+        }
     };
     match res {
         Ok(()) => ExitCode::SUCCESS,
@@ -276,6 +280,56 @@ fn codesign(identity: &str, entitlements: Option<&str>, target: &Path) -> Res {
     run("codesign", &args)
 }
 
+fn build_icns(src: &Path, dst: &Path) -> Res {
+    const ICONSET_SIZES: [(&str, &str); 10] = [
+        ("icon_16x16.png", "16"),
+        ("icon_16x16@2x.png", "32"),
+        ("icon_32x32.png", "32"),
+        ("icon_32x32@2x.png", "64"),
+        ("icon_128x128.png", "128"),
+        ("icon_128x128@2x.png", "256"),
+        ("icon_256x256.png", "256"),
+        ("icon_256x256@2x.png", "512"),
+        ("icon_512x512.png", "512"),
+        ("icon_512x512@2x.png", "1024"),
+    ];
+    if !src.is_file() {
+        return Err(format!("Missing icon PNG: {}", src.display()).into());
+    }
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let iconset = dst.with_extension("iconset");
+    if iconset.exists() {
+        fs::remove_dir_all(&iconset)?;
+    }
+    fs::create_dir_all(&iconset)?;
+    let src_str = path_str(src)?;
+    for (name, size) in ICONSET_SIZES {
+        let out = iconset.join(name);
+        run(
+            "sips",
+            &[
+                "-s",
+                "format",
+                "png",
+                "-z",
+                size,
+                size,
+                src_str,
+                "--out",
+                path_str(&out)?,
+            ],
+        )?;
+    }
+    run(
+        "iconutil",
+        &["-c", "icns", path_str(&iconset)?, "-o", path_str(dst)?],
+    )?;
+    fs::remove_dir_all(&iconset)?;
+    Ok(())
+}
+
 fn cmd_macos(cfg: &Config) -> Res {
     let makepad_root = resolve_makepad_root()?;
     let widgets_res = makepad_root.join("widgets/resources");
@@ -325,6 +379,7 @@ fn cmd_macos(cfg: &Config) -> Res {
     }
 
     copy_mode(Path::new(INFO_PLIST), &contents.join("Info.plist"), 0o644)?;
+    build_icns(Path::new(APP_ICON), &resources_dir.join("AppIcon.icns"))?;
     fs::write(contents.join("PkgInfo"), "APPL????")?;
     for bin in ["koma-app", "koma", "makepad-app-browser-host"] {
         copy_mode(&arch_bin.join(bin), &macos_dir.join(bin), 0o755)?;

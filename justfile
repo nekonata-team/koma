@@ -59,9 +59,11 @@ private:
 bundle-macos:
     cargo build --locked -p koma-app -p koma-browser-host
     bin="${CARGO_TARGET_DIR:-target}/debug"; contents="$bin/Koma.app/Contents"; \
-        mkdir -p "$contents/MacOS" && \
+        mkdir -p "$contents/MacOS" "$contents/Resources" && \
         install -CS -m 644 crates/koma-app/macos/Info.plist "$contents/" && \
-        install -CS -m 755 "$bin/koma-app" "$bin/makepad-app-browser-host" "$contents/MacOS/"
+        install -CS -m 755 "$bin/koma-app" "$bin/makepad-app-browser-host" "$contents/MacOS/" && \
+        { [ "$contents/Resources/AppIcon.icns" -nt crates/koma-app/resources/icon_1024.png ] || \
+          cargo run --locked -p xtask -- icns crates/koma-app/resources/icon_1024.png "$contents/Resources/AppIcon.icns"; }
 
 # koma CLI を実行する
 [positional-arguments]
