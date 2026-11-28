@@ -11,7 +11,7 @@ use koma_app::domain::sheet_presets::available_sheet_presets;
 use koma_app::persistence;
 use koma_core::input::{derive_url_label, KomaInput};
 use koma_core::model::{
-    InputMode, InsertKomaOptions, KomaId, KomaKind, KomaMeta, SheetId, SheetState, WorkspaceState,
+    InputMode, InsertKomaOptions, Koma, KomaContent, KomaId, SheetId, SheetState, WorkspaceState,
 };
 use makepad_widgets::*;
 
@@ -294,14 +294,16 @@ pub(super) fn home_dir_string() -> Option<String> {
     koma_ipc::workspaces::home_dir().map(|p| p.to_string_lossy().into_owned())
 }
 
-pub(super) fn latest_web_url_with(rt: &WebViewRuntime, koma: &KomaMeta) -> Option<String> {
-    if koma.kind != KomaKind::Web {
+pub(super) fn latest_web_url_with(rt: &WebViewRuntime, koma: &Koma) -> Option<String> {
+    let KomaContent::Web { initial_url, .. } = &koma.content else {
         return None;
-    }
-    rt.koma_url_title(&koma.id)
-        .map(|(url, _)| url)
-        .filter(|url| !url.is_empty())
-        .or_else(|| koma.initial_url.clone())
+    };
+    Some(
+        rt.koma_url_title(&koma.id)
+            .map(|(url, _)| url)
+            .filter(|url| !url.is_empty())
+            .unwrap_or_else(|| initial_url.clone()),
+    )
 }
 
 impl App {
@@ -327,7 +329,7 @@ impl App {
         } else {
             self.state
                 .koma_by_id(koma_id)
-                .and_then(|b| b.initial_url.clone())
+                .and_then(|b| b.initial_url().map(str::to_owned))
                 .unwrap_or_default()
         };
         (url, title)
@@ -491,7 +493,7 @@ impl App {
         &mut self,
         cx: &mut Cx,
         id: Option<&KomaId>,
-    ) -> Result<KomaMeta, String> {
+    ) -> Result<Koma, String> {
         let koma = self.state.place_drawer_item(id)?;
         self.state.mode = InputMode::ContentInput;
         self.sync_after_mutation(cx, true);
@@ -502,19 +504,16 @@ impl App {
         &mut self,
         cx: &mut Cx,
         id: Option<&KomaId>,
-    ) -> Result<KomaMeta, String> {
+    ) -> Result<Koma, String> {
         let item = self.state.discard_drawer_item(id)?;
-        self.with_strip_mut(cx, |strip, cx| strip.remove_koma(cx, &item.id, item.kind));
+        self.with_strip_mut(cx, |strip, cx| strip.remove_koma(cx, &item.id));
         self.sync_after_mutation(cx, false);
         Ok(item)
     }
 
-    pub(super) fn restore_discarded_drawer_item(
-        &mut self,
-        cx: &mut Cx,
-    ) -> Result<KomaMeta, String> {
+    pub(super) fn restore_discarded_drawer_item(&mut self, cx: &mut Cx) -> Result<Koma, String> {
         let item = self.state.restore_discarded_drawer_item()?;
-        if item.kind == KomaKind::Web && item.koma_api_enabled {
+        if item.koma_api_enabled() {
             self.web_runtime()
                 .borrow_mut()
                 .set_koma_api_enabled(cx, &item.id, true);
@@ -542,7 +541,7 @@ impl App {
         self.sync_after_mutation(cx, true);
     }
 
-    pub(super) fn create_terminal_koma(&mut self, cx: &mut Cx, cwd: Option<String>) -> KomaMeta {
+    pub(super) fn create_terminal_koma(&mut self, cx: &mut Cx, cwd: Option<String>) -> Koma {
         self.create_terminal_koma_after(cx, cwd, None)
     }
 
@@ -551,7 +550,7 @@ impl App {
         cx: &mut Cx,
         cwd: Option<String>,
         caller: Option<&KomaId>,
-    ) -> KomaMeta {
+    ) -> Koma {
         self.create_koma_after(cx, KomaInput::Terminal { cwd, command: None }, None, caller)
     }
 
@@ -560,7 +559,7 @@ impl App {
         cx: &mut Cx,
         url: String,
         label: Option<String>,
-    ) -> KomaMeta {
+    ) -> Koma {
         self.create_web_koma_after(cx, url, label, None)
     }
 
@@ -569,21 +568,16 @@ impl App {
         cx: &mut Cx,
         view_id: makepad_browser_view::ViewId,
         url: String,
-    ) -> KomaMeta {
+    ) -> Koma {
         let display_url = if url.is_empty() {
             "about:blank".to_string()
         } else {
             url
         };
         let label = derive_url_label(&display_url);
-        let (koma, focused_active) = self.state.insert_koma_after(
-            KomaKind::Web,
-            label,
-            Some(display_url.clone()),
-            None,
-            None,
-            None,
-        );
+        let (koma, focused_active) =
+            self.state
+                .insert_koma_after(label, KomaContent::web(display_url.clone()), None);
         self.web_runtime()
             .borrow_mut()
             .bind_popup_view(cx, &koma.id, view_id, &display_url);
@@ -603,12 +597,12 @@ impl App {
         url: String,
         label: Option<String>,
         caller: Option<&KomaId>,
-    ) -> KomaMeta {
+    ) -> Koma {
         let label = label.unwrap_or_else(|| derive_url_label(&url));
         self.create_koma_after(cx, KomaInput::Web { url, label }, None, caller)
     }
 
-    fn create_koma(&mut self, cx: &mut Cx, input: KomaInput, recent: Option<&str>) -> KomaMeta {
+    fn create_koma(&mut self, cx: &mut Cx, input: KomaInput, recent: Option<&str>) -> Koma {
         self.create_koma_after(cx, input, recent, None)
     }
 
@@ -618,7 +612,7 @@ impl App {
         input: KomaInput,
         recent: Option<&str>,
         caller: Option<&KomaId>,
-    ) -> KomaMeta {
+    ) -> Koma {
         self.create_koma_with_options(cx, input, recent, caller, InsertKomaOptions::default())
             .expect("default InsertKomaOptions is always valid")
     }
@@ -630,8 +624,8 @@ impl App {
         recent: Option<&str>,
         caller: Option<&KomaId>,
         opts: InsertKomaOptions,
-    ) -> Result<KomaMeta, String> {
-        let (kind, label, url, cwd, command) = match input {
+    ) -> Result<Koma, String> {
+        let (label, spec) = match input {
             KomaInput::Terminal { cwd, command } => {
                 let label = if cwd.is_some() {
                     derive_cwd_label(cwd.as_deref())
@@ -643,13 +637,13 @@ impl App {
                 } else {
                     derive_cwd_label(None)
                 };
-                (KomaKind::Terminal, label, None, cwd, command)
+                (label, KomaContent::terminal(cwd, command))
             }
-            KomaInput::Web { url, label } => (KomaKind::Web, label, Some(url), None, None),
+            KomaInput::Web { url, label } => (label, KomaContent::web(url)),
         };
         let (koma, focused_active) = self
             .state
-            .insert_koma_with_options(kind, label, url, cwd, command, caller, opts)?;
+            .insert_koma_with_options(label, spec, caller, opts)?;
         if focused_active {
             self.state.mode = InputMode::ContentInput;
         }
@@ -704,7 +698,7 @@ impl App {
         let removed = self.state.remove_current_sheet()?;
         self.with_strip_mut(cx, |strip, cx| {
             for koma in &removed.komas {
-                strip.remove_koma(cx, &koma.id, koma.kind);
+                strip.remove_koma(cx, &koma.id);
             }
         });
         self.sync_after_mutation(cx, true);
@@ -720,7 +714,7 @@ impl App {
         let (removed, was_active) = self.state.remove_sheet_by_id(sheet_id, force)?;
         self.with_strip_mut(cx, |strip, cx| {
             for koma in &removed.komas {
-                strip.remove_koma(cx, &koma.id, koma.kind);
+                strip.remove_koma(cx, &koma.id);
             }
         });
         self.sync_after_mutation(cx, was_active);
@@ -746,21 +740,12 @@ impl App {
         Ok(idx)
     }
 
-    pub(super) fn open_devtools_for_focused_web(
-        &mut self,
-        cx: &mut Cx,
-    ) -> Result<KomaMeta, String> {
+    pub(super) fn open_devtools_for_focused_web(&mut self, cx: &mut Cx) -> Result<Koma, String> {
         let target = self
             .state
             .focused_koma()
-            .filter(|b| b.kind == KomaKind::Web)
-            .or_else(|| {
-                self.state
-                    .current_sheet()
-                    .komas
-                    .iter()
-                    .find(|b| b.kind == KomaKind::Web)
-            })
+            .filter(|b| b.is_web())
+            .or_else(|| self.state.current_sheet().komas.iter().find(|b| b.is_web()))
             .cloned()
             .ok_or_else(|| "No Web Koma in current sheet".to_string())?;
         let url = self
@@ -771,9 +756,9 @@ impl App {
         Ok(koma)
     }
 
-    fn finish_remove_koma(&mut self, cx: &mut Cx, removed: koma_core::model::KomaMeta) {
+    fn finish_remove_koma(&mut self, cx: &mut Cx, removed: Koma) {
         self.with_strip_mut(cx, |strip, cx| {
-            strip.close_koma(cx, &removed.id, removed.kind);
+            strip.close_koma(cx, &removed.id);
         });
         self.sync_after_mutation(cx, true);
     }
@@ -805,7 +790,7 @@ impl App {
             self.show_toast(cx, "No closed Koma to reopen");
             return;
         };
-        if koma.kind == KomaKind::Web && koma.koma_api_enabled {
+        if koma.koma_api_enabled() {
             self.web_runtime()
                 .borrow_mut()
                 .set_koma_api_enabled(cx, &koma.id, true);
@@ -817,7 +802,7 @@ impl App {
     fn focused_web_id(&self) -> Option<KomaId> {
         self.state
             .focused_koma()
-            .filter(|b| b.kind == KomaKind::Web)
+            .filter(|b| b.is_web())
             .map(|b| b.id.clone())
     }
 

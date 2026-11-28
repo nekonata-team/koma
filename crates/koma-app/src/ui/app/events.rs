@@ -430,13 +430,8 @@ impl App {
                 "keepInDrawer" => {
                     if let Some(url) = ev.url {
                         let label = koma_core::input::derive_url_label(&url);
-                        self.state.keep_koma_in_drawer(
-                            koma_core::model::KomaKind::Web,
-                            label,
-                            Some(url),
-                            None,
-                            false,
-                        );
+                        self.state
+                            .keep_koma_in_drawer(label, koma_core::model::KomaContent::web(url));
                         self.sync_after_mutation(cx, false);
                     }
                 }

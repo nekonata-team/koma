@@ -5,7 +5,8 @@ use std::process::{Command, ExitCode};
 
 use clap::Parser;
 use koma_ipc::protocol::{
-    IpcCommand, IpcPayload, IpcRequest, IpcResponse, KomaSummary, WorkspaceCommand,
+    DrawerItemContent, IpcCommand, IpcPayload, IpcRequest, IpcResponse, KomaSummary,
+    KomaSummaryContent, WorkspaceCommand,
 };
 use koma_ipc::transport::{resolve_socket_path, send_request};
 use makepad_micro_serde::SerJson;
@@ -200,12 +201,12 @@ fn print_ipc_payload(payload: IpcPayload, is_health: bool) -> Result<(), String>
         IpcPayload::Text { text, .. } => println!("{text}"),
         IpcPayload::DrawerList { items } => {
             for item in items {
-                let extra = item
-                    .url
-                    .or(item.cwd)
-                    .map(|s| format!(" -> {s}"))
-                    .unwrap_or_default();
-                println!("[{}: {} ({}){extra}]", item.kind, item.label, item.id);
+                let (kind, detail) = match item.content {
+                    DrawerItemContent::Terminal { cwd } => ("terminal", cwd),
+                    DrawerItemContent::Web { url } => ("web", Some(url)),
+                };
+                let extra = detail.map(|s| format!(" -> {s}")).unwrap_or_default();
+                println!("[{kind}: {} ({}){extra}]", item.label, item.id);
             }
         }
         IpcPayload::NotificationList { notifications } => {
@@ -224,10 +225,13 @@ fn print_ipc_payload(payload: IpcPayload, is_health: bool) -> Result<(), String>
 
 fn print_koma(indent: &str, koma: KomaSummary) {
     let focus = if koma.is_focused { "*" } else { "" };
-    let extra = koma.url.map(|url| format!(" -> {url}")).unwrap_or_default();
+    let (kind, extra) = match koma.content {
+        KomaSummaryContent::Terminal => ("terminal", String::new()),
+        KomaSummaryContent::Web { url } => ("web", format!(" -> {url}")),
+    };
     println!(
-        "{indent}[{}: {}{} ({}){extra}]",
-        koma.kind, koma.label, focus, koma.id
+        "{indent}[{kind}: {}{} ({}){extra}]",
+        koma.label, focus, koma.id
     );
 }
 

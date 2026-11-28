@@ -6,45 +6,58 @@ use std::path::Path;
 use makepad_micro_serde::*;
 
 use koma_core::model::{
-    KomaId, KomaKind, KomaMeta, PersonalSheetPreset, RecentEntry, SheetId, SheetState,
+    Koma, KomaContent, KomaId, PersonalSheetPreset, RecentEntry, SheetId, SheetState,
     WorkspaceState, MAX_KOMA_WIDTH, MIN_KOMA_WIDTH,
 };
 pub use koma_ipc::workspaces::state_dir;
 
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
+enum SavedKomaContent {
+    Terminal {
+        /// Absent until a path is given or reported by the shell (OSC 7).
+        cwd: Option<String>,
+        command: Option<String>,
+    },
+    Web {
+        initial_url: String,
+        koma_api_enabled: bool,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
 struct SavedKoma {
     id: String,
-    kind: String,
     label: String,
-    initial_url: Option<String>,
-    cwd: Option<String>,
-    command: Option<String>,
+    content: SavedKomaContent,
     width: f64,
     ratio: Option<f64>,
-    koma_api_enabled: Option<bool>,
 }
 
 impl SavedKoma {
-    fn from_meta(b: &KomaMeta) -> Self {
+    fn from_koma(b: &Koma) -> Self {
+        let content = match &b.content {
+            KomaContent::Terminal { cwd, command } => SavedKomaContent::Terminal {
+                cwd: cwd.clone(),
+                command: command.clone(),
+            },
+            KomaContent::Web {
+                initial_url,
+                koma_api_enabled,
+            } => SavedKomaContent::Web {
+                initial_url: initial_url.clone(),
+                koma_api_enabled: *koma_api_enabled,
+            },
+        };
         Self {
             id: b.id.to_string(),
-            kind: b.kind.as_str().into(),
             label: b.label.clone(),
-            initial_url: b.initial_url.clone(),
-            cwd: b.cwd.clone(),
-            command: b.command.clone(),
+            content,
             width: b.width,
             ratio: b.ratio,
-            koma_api_enabled: b.koma_api_enabled.then_some(true),
         }
     }
 
-    fn into_meta(self, sheet_id: Option<SheetId>, profile_id: String) -> Result<KomaMeta, String> {
-        let kind = match self.kind.as_str() {
-            "terminal" => KomaKind::Terminal,
-            "web" => KomaKind::Web,
-            other => return Err(format!("Unknown Koma kind: {other}")),
-        };
+    fn into_koma(self, sheet_id: Option<SheetId>, profile_id: String) -> Result<Koma, String> {
         if !self.width.is_finite() || self.width <= 0.0 {
             return Err(format!("Invalid Koma width: {}", self.width));
         }
@@ -53,20 +66,20 @@ impl SavedKoma {
                 return Err(format!("Invalid Koma ratio: {r}"));
             }
         }
-        Ok(KomaMeta {
-            id: self.id.into(),
-            sheet_id,
-            profile_id,
-            kind,
-            label: self.label,
-            initial_url: self.initial_url,
-            cwd: self.cwd,
-            command: self.command,
-            width: self.width.clamp(MIN_KOMA_WIDTH, MAX_KOMA_WIDTH),
-            ratio: self.ratio,
-            restore: None,
-            koma_api_enabled: self.koma_api_enabled.unwrap_or(false),
-        })
+        let content = match self.content {
+            SavedKomaContent::Terminal { cwd, command } => KomaContent::Terminal { cwd, command },
+            SavedKomaContent::Web {
+                initial_url,
+                koma_api_enabled,
+            } => KomaContent::Web {
+                initial_url,
+                koma_api_enabled,
+            },
+        };
+        let mut koma = Koma::new(self.id.into(), sheet_id, profile_id, self.label, content);
+        koma.width = self.width.clamp(MIN_KOMA_WIDTH, MAX_KOMA_WIDTH);
+        koma.ratio = self.ratio;
+        Ok(koma)
     }
 }
 
@@ -103,7 +116,7 @@ struct SavedState {
     personal_presets: Option<Vec<SavedPreset>>,
 }
 
-const VERSION: usize = 1;
+const VERSION: usize = 2;
 
 pub fn to_json(state: &WorkspaceState) -> String {
     SavedState {
@@ -119,11 +132,11 @@ pub fn to_json(state: &WorkspaceState) -> String {
                 id: d.id.to_string(),
                 label: d.label.clone(),
                 focused_koma_id: d.focused_koma_id.as_ref().map(ToString::to_string),
-                komas: d.komas.iter().map(SavedKoma::from_meta).collect(),
+                komas: d.komas.iter().map(SavedKoma::from_koma).collect(),
             })
             .collect(),
         drawer: (!state.drawer.is_empty())
-            .then(|| state.drawer.iter().map(SavedKoma::from_meta).collect()),
+            .then(|| state.drawer.iter().map(SavedKoma::from_koma).collect()),
         recents: (!state.recents.is_empty()).then(|| {
             state
                 .recents
@@ -174,7 +187,7 @@ fn parse_state(text: &str) -> Result<WorkspaceState, ParseStateError> {
         let mut komas = Vec::new();
         for b in d.komas {
             komas.push(
-                b.into_meta(Some(sheet_id.clone()), saved.profile_id.clone())
+                b.into_koma(Some(sheet_id.clone()), saved.profile_id.clone())
                     .map_err(ParseStateError::Corrupt)?,
             );
         }
@@ -188,7 +201,7 @@ fn parse_state(text: &str) -> Result<WorkspaceState, ParseStateError> {
     let mut drawer = Vec::new();
     for b in saved.drawer.unwrap_or_default() {
         drawer.push(
-            b.into_meta(None, saved.profile_id.clone())
+            b.into_koma(None, saved.profile_id.clone())
                 .map_err(ParseStateError::Corrupt)?,
         );
     }
@@ -314,23 +327,13 @@ mod tests {
         assert_eq!(load(&dir).unwrap().unwrap(), empty);
 
         let mut state = WorkspaceState::new();
-        let web = state.insert_koma_after_focused(
-            KomaKind::Web,
-            "Local".into(),
-            Some("file:///tmp/index.html".into()),
-            None,
-        );
+        let web = state
+            .insert_koma_after_focused("Local".into(), KomaContent::web("file:///tmp/index.html"));
         state.set_koma_api_enabled(&web.id, true);
-        assert!(state.koma_by_id(&web.id).unwrap().koma_api_enabled);
+        assert!(state.koma_by_id(&web.id).unwrap().koma_api_enabled());
         state.cycle_width_preset(&[0.5]);
         state.add_sheet(true);
-        state.keep_koma_in_drawer(
-            KomaKind::Web,
-            "Docs".into(),
-            Some("https://docs.rs".into()),
-            None,
-            false,
-        );
+        state.keep_koma_in_drawer("Docs".into(), KomaContent::web("https://docs.rs"));
         state.record_recent("https://docs.rs", "Docs");
         state.save_current_sheet_as_preset("Coding").unwrap();
         save(&dir, &state).unwrap();
@@ -344,12 +347,8 @@ mod tests {
 
         // Unique IDs that do not follow the current allocation format are still valid.
         let mut custom = WorkspaceState::new();
-        let mut koma = custom.insert_koma_after_focused(
-            KomaKind::Web,
-            "Custom".into(),
-            Some("https://example.com".into()),
-            None,
-        );
+        let mut koma = custom
+            .insert_koma_after_focused("Custom".into(), KomaContent::web("https://example.com"));
         koma.id = "custom-web".into();
         koma.sheet_id = Some("custom-sheet".into());
         let custom = WorkspaceState::restore_layout(
@@ -422,7 +421,7 @@ mod tests {
     #[test]
     fn rejects_duplicate_koma_ids_across_sheets_and_drawer() {
         let mut state = WorkspaceState::new();
-        state.insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None);
+        state.insert_koma_after_focused("Shell".into(), KomaContent::terminal(None, None));
         state.add_sheet(true);
         let mut saved = SavedState::deserialize_json(&to_json(&state)).unwrap();
         let koma = saved.sheets[0].komas[0].clone();

@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use koma_app::config::{CenterFocused, ScaleConfig};
 use koma_app::ghostty_config::{CellHeight, TerminalSettings};
-use koma_core::model::{InputMode, KomaId, KomaKind, KomaMeta, SheetId, WorkspaceState};
+use koma_core::model::{InputMode, Koma, KomaContent, KomaId, SheetId, WorkspaceState};
 use makepad_app_terminal::term::color::Rgb;
 use makepad_app_terminal::widget::{MpTerm, TerminalColors};
 use makepad_widgets::*;
@@ -436,12 +436,12 @@ impl SheetStrip {
                     is_active || in_overview || is_sliding_prev,
                 );
                 if in_overview {
-                    if koma.kind == KomaKind::Terminal {
+                    if koma.is_terminal() {
                         self.cancel_terminal_interaction(cx, &koma.id);
                     }
                 } else if !is_active && !is_sliding_prev {
                     self.deactivate_hidden_koma(cx, koma);
-                } else if koma.kind == KomaKind::Web {
+                } else if koma.is_web() {
                     if let Some(rt) = &self.shared_web_runtime {
                         rt.borrow_mut().set_koma_hidden(cx, &koma.id, false);
                     }
@@ -465,19 +465,18 @@ impl SheetStrip {
                     .komas
                     .iter()
                     .map(|b| {
-                        let detail = match b.kind {
-                            KomaKind::Web => self
+                        let detail = match &b.content {
+                            KomaContent::Web { initial_url, .. } => self
                                 .shared_web_runtime
                                 .as_ref()
                                 .and_then(|rt| rt.borrow().koma_url_title(&b.id).map(|(u, _)| u))
                                 .filter(|u| !u.is_empty())
-                                .or_else(|| b.initial_url.clone())
-                                .unwrap_or_default(),
-                            KomaKind::Terminal => b.cwd.clone().unwrap_or_default(),
+                                .unwrap_or_else(|| initial_url.clone()),
+                            KomaContent::Terminal { cwd, .. } => cwd.clone().unwrap_or_default(),
                         };
                         KomaSlot {
                             koma_id: b.id.clone(),
-                            kind: b.kind,
+                            content: b.content.clone(),
                             label: b.label.clone(),
                             detail,
                             raw_width: b.width,
@@ -535,7 +534,7 @@ impl SheetStrip {
     fn ensure_koma_widget(
         &mut self,
         cx: &mut Cx,
-        koma: &KomaMeta,
+        koma: &Koma,
         sock_path: &str,
         path_env: &str,
         should_paint_now: bool,
@@ -543,8 +542,8 @@ impl SheetStrip {
         if self.koma_widgets.contains_key(&koma.id) {
             return;
         }
-        match koma.kind {
-            KomaKind::Terminal => {
+        match &koma.content {
+            KomaContent::Terminal { cwd, command } => {
                 let template = self.term_template.clone();
                 let widget = cx.with_vm(|vm| WidgetRef::script_from_value(vm, template.into()));
                 if let Some(mut term) = widget.borrow_mut::<MpTerm>() {
@@ -580,13 +579,12 @@ impl SheetStrip {
                             .collect(),
                         background_opacity: settings.background_opacity,
                     });
-                    term.cwd = koma
-                        .cwd
+                    term.cwd = cwd
                         .as_deref()
                         .map(PathBuf::from)
                         .or_else(koma_ipc::workspaces::home_dir);
                     term.shell = self.terminal_shell.clone();
-                    term.command = koma.command.clone();
+                    term.command = command.clone();
                     term.copy_on_select = settings.copy_on_select;
                     term.ligatures = settings.ligatures;
                     term.env = vec![
@@ -601,20 +599,15 @@ impl SheetStrip {
                 self.koma_widgets
                     .insert(koma.id.clone(), KomaWidget::Terminal(widget));
             }
-            KomaKind::Web => {
+            KomaContent::Web { initial_url, .. } => {
                 let template = self.web_template.clone();
                 let widget = cx.with_vm(|vm| WidgetRef::script_from_value(vm, template.into()));
-                let url = koma
-                    .initial_url
-                    .as_deref()
-                    .unwrap_or("https://example.com")
-                    .to_string();
                 if let Some(rt) = &self.shared_web_runtime {
                     if let Some(mut web) = widget.borrow_mut::<WebKoma>() {
                         web.bind_shared(
                             Rc::clone(rt),
                             koma.id.clone(),
-                            url.clone(),
+                            initial_url.clone(),
                             self.scale.web,
                         );
                     }
@@ -622,7 +615,7 @@ impl SheetStrip {
                         rt.borrow_mut().ensure_koma(
                             cx,
                             &koma.id,
-                            &url,
+                            initial_url,
                             false,
                             dvec2(koma.width, 680.0),
                             2.0,
@@ -657,16 +650,16 @@ impl SheetStrip {
         };
         let mut rt = rt.borrow_mut();
         for slot in &sheet.komas {
-            if slot.kind == KomaKind::Web {
+            if slot.content.is_web() {
                 rt.set_koma_hidden(cx, &slot.koma_id, true);
             }
         }
     }
 
-    fn deactivate_hidden_koma(&mut self, cx: &mut Cx, koma: &KomaMeta) {
-        match koma.kind {
-            KomaKind::Terminal => self.cancel_terminal_interaction(cx, &koma.id),
-            KomaKind::Web => {
+    fn deactivate_hidden_koma(&mut self, cx: &mut Cx, koma: &Koma) {
+        match &koma.content {
+            KomaContent::Terminal { .. } => self.cancel_terminal_interaction(cx, &koma.id),
+            KomaContent::Web { .. } => {
                 if let Some(rt) = &self.shared_web_runtime {
                     rt.borrow_mut().set_koma_hidden(cx, &koma.id, true);
                 }
@@ -674,12 +667,12 @@ impl SheetStrip {
         }
     }
 
-    pub fn close_koma(&mut self, cx: &mut Cx, koma_id: &KomaId, kind: KomaKind) {
+    pub fn close_koma(&mut self, cx: &mut Cx, koma_id: &KomaId) {
         self.animate_koma_close(cx, koma_id);
-        self.remove_koma(cx, koma_id, kind);
+        self.remove_koma(cx, koma_id);
     }
 
-    pub fn remove_koma(&mut self, cx: &mut Cx, koma_id: &KomaId, kind: KomaKind) {
+    pub fn remove_koma(&mut self, cx: &mut Cx, koma_id: &KomaId) {
         self.anim.remove_koma(koma_id);
         for sheet in &mut self.sheets {
             sheet.komas.retain(|s| &s.koma_id != koma_id);
@@ -701,10 +694,8 @@ impl SheetStrip {
                 term.unload(cx);
             }
         }
-        if kind == KomaKind::Web {
-            if let Some(rt) = &self.shared_web_runtime {
-                rt.borrow_mut().close_koma(cx, koma_id);
-            }
+        if let Some(rt) = &self.shared_web_runtime {
+            rt.borrow_mut().close_koma(cx, koma_id);
         }
         self.redraw(cx);
     }
@@ -830,7 +821,7 @@ mod tests {
                     .iter()
                     .map(|k| KomaSlot {
                         koma_id: k.id.clone(),
-                        kind: k.kind,
+                        content: k.content.clone(),
                         label: k.label.clone(),
                         detail: String::new(),
                         raw_width: k.width,
@@ -904,10 +895,10 @@ mod tests {
     fn inserting_left_of_focus_without_reveal_keeps_scroll_anchor() {
         let mut state = WorkspaceState::new();
         let first = state
-            .insert_koma_after_focused(KomaKind::Terminal, "first".into(), None, None)
+            .insert_koma_after_focused("first".into(), KomaContent::terminal(None, None))
             .id;
         let second = state
-            .insert_koma_after_focused(KomaKind::Terminal, "second".into(), None, None)
+            .insert_koma_after_focused("second".into(), KomaContent::terminal(None, None))
             .id;
         state.focus_koma_by_id(&second);
 
@@ -916,11 +907,8 @@ mod tests {
 
         // Insert a koma after `first` (to the left of focused `second`) while keeping focus on `second`.
         let (inserted, _) = state.insert_koma_after(
-            KomaKind::Terminal,
             "inserted".into(),
-            None,
-            None,
-            None,
+            KomaContent::terminal(None, None),
             Some(&first),
         );
         state.focus_koma_by_id(&second);
@@ -960,9 +948,9 @@ mod tests {
     #[test]
     fn reordering_same_sheet_with_reveal_plans_reorder_slide() {
         let mut state = WorkspaceState::new();
-        state.insert_koma_after_focused(KomaKind::Terminal, "first".into(), None, None);
+        state.insert_koma_after_focused("first".into(), KomaContent::terminal(None, None));
         let second = state
-            .insert_koma_after_focused(KomaKind::Terminal, "second".into(), None, None)
+            .insert_koma_after_focused("second".into(), KomaContent::terminal(None, None))
             .id;
         state.focus_koma_by_id(&second);
 

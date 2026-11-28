@@ -1,7 +1,7 @@
-use super::{step_index, KomaId, KomaKind, KomaMeta, WorkspaceState, DEFAULT_KOMA_WIDTH};
+use super::{step_index, Koma, KomaContent, KomaId, WorkspaceState};
 
 impl WorkspaceState {
-    pub fn stow_focused_koma_to_drawer(&mut self) -> Result<KomaMeta, String> {
+    pub fn stow_focused_koma_to_drawer(&mut self) -> Result<Koma, String> {
         let mut koma = self
             .remove_focused_koma()
             .ok_or_else(|| "No focused koma to stow".to_string())?;
@@ -11,35 +11,15 @@ impl WorkspaceState {
         Ok(koma)
     }
 
-    pub fn keep_koma_in_drawer(
-        &mut self,
-        kind: KomaKind,
-        label: String,
-        initial_url: Option<String>,
-        cwd: Option<String>,
-        koma_api_enabled: bool,
-    ) -> KomaMeta {
+    pub fn keep_koma_in_drawer(&mut self, label: String, spec: KomaContent) -> Koma {
         let id = self.allocate_koma_id();
-        let item = KomaMeta {
-            id,
-            sheet_id: None,
-            profile_id: self.profile_id.clone(),
-            kind,
-            label,
-            initial_url,
-            cwd,
-            command: None,
-            width: DEFAULT_KOMA_WIDTH,
-            ratio: None,
-            restore: None,
-            koma_api_enabled,
-        };
+        let item = Koma::new(id, None, self.profile_id.clone(), label, spec);
         self.drawer.push(item.clone());
         self.drawer_selected = self.drawer.len() - 1;
         item
     }
 
-    pub fn place_drawer_item(&mut self, id: Option<&KomaId>) -> Result<KomaMeta, String> {
+    pub fn place_drawer_item(&mut self, id: Option<&KomaId>) -> Result<Koma, String> {
         let idx = self.resolve_drawer_index(id)?;
         let mut koma = self.drawer.remove(idx);
         self.clamp_drawer_selection();
@@ -55,7 +35,7 @@ impl WorkspaceState {
         Ok(koma)
     }
 
-    pub fn discard_drawer_item(&mut self, id: Option<&KomaId>) -> Result<KomaMeta, String> {
+    pub fn discard_drawer_item(&mut self, id: Option<&KomaId>) -> Result<Koma, String> {
         let idx = self.resolve_drawer_index(id)?;
         let item = self.drawer.remove(idx);
         self.clamp_drawer_selection();
@@ -63,7 +43,7 @@ impl WorkspaceState {
         Ok(item)
     }
 
-    pub fn restore_discarded_drawer_item(&mut self) -> Result<KomaMeta, String> {
+    pub fn restore_discarded_drawer_item(&mut self) -> Result<Koma, String> {
         let item = self
             .discarded_drawer
             .pop()
@@ -107,13 +87,9 @@ mod tests {
     #[test]
     fn drawer_lifecycle_stows_keeps_places_discards_and_restores() {
         let mut state = WorkspaceState::new();
-        let term = state.insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None);
-        state.insert_koma_after_focused(
-            KomaKind::Web,
-            "Web".into(),
-            Some("https://example.com".into()),
-            None,
-        );
+        let term =
+            state.insert_koma_after_focused("Shell".into(), KomaContent::terminal(None, None));
+        state.insert_koma_after_focused("Web".into(), KomaContent::web("https://example.com"));
         state.focus_koma_by_id(&term.id);
         state.add_sheet(false);
         state.switch_sheet(0);
@@ -124,13 +100,7 @@ mod tests {
         assert_eq!(state.drawer.len(), 1);
         assert_eq!(state.sheets[0].komas.len(), 1);
 
-        let kept = state.keep_koma_in_drawer(
-            KomaKind::Web,
-            "Docs".into(),
-            Some("https://docs.rs".into()),
-            None,
-            false,
-        );
+        let kept = state.keep_koma_in_drawer("Docs".into(), KomaContent::web("https://docs.rs"));
         assert_eq!(kept.sheet_id, None);
         assert_eq!(state.drawer.len(), 2);
 

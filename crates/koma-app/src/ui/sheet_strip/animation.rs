@@ -287,7 +287,7 @@ impl SheetStrip {
 mod tests {
     use std::collections::HashMap;
 
-    use koma_core::model::KomaKind;
+    use koma_core::model::KomaContent;
 
     use super::*;
     use crate::ui::sheet_strip::STRIP_SPACING;
@@ -295,7 +295,7 @@ mod tests {
     fn slot(id: &str, width: f64) -> KomaSlot {
         KomaSlot {
             koma_id: id.into(),
-            kind: KomaKind::Terminal,
+            content: KomaContent::terminal(None, None),
             label: String::new(),
             detail: String::new(),
             raw_width: width,

@@ -480,7 +480,7 @@ fn ipc_sheet_koma_and_pty_lifecycle() {
                     .unwrap();
                 let terminal = saved.koma_by_id(&koma_id.as_str().into()).unwrap();
                 terminal.label == "Working label"
-                    && terminal.cwd.as_deref().map(Path::new) == Some(reported_cwd.as_path())
+                    && terminal.cwd().map(Path::new) == Some(reported_cwd.as_path())
             },
         );
         app.ipc(IpcCommand::Terminal(TerminalCommand::Kill(input("TERM"))))

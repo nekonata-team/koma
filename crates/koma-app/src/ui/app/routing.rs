@@ -1,7 +1,7 @@
 //! Keyboard mapping and `RouteDecision` execution for `App`.
 
 use koma_app::domain::router::{Key, KeyStroke, RouteDecision};
-use koma_core::model::{InputMode, KomaKind};
+use koma_core::model::InputMode;
 use makepad_widgets::*;
 
 use super::{latest_web_url_with, App, PromptMode};
@@ -129,16 +129,15 @@ impl App {
         let had_terminal_command = self
             .state
             .focused_koma()
-            .is_some_and(|b| b.kind == KomaKind::Terminal && b.command.is_some());
+            .is_some_and(|b| b.command().is_some());
         let needs_sessions = self.state.focused_koma().is_some_and(|b| {
-            b.kind == KomaKind::Terminal
-                && b.command.as_deref().is_some_and(|cmd| {
-                    self.config
-                        .terminal
-                        .session_prefixes
-                        .iter()
-                        .any(|p| !p.is_empty() && cmd.starts_with(p.as_str()))
-                })
+            b.command().is_some_and(|cmd| {
+                self.config
+                    .terminal
+                    .session_prefixes
+                    .iter()
+                    .any(|p| !p.is_empty() && cmd.starts_with(p.as_str()))
+            })
         });
         let extra_sessions = if needs_sessions {
             if let Some(cmd) = self.config.terminal.session_list_command.as_deref() {
@@ -163,7 +162,7 @@ impl App {
             Ok(duplicated) => {
                 self.state.mode = InputMode::ContentInput;
                 self.sync_after_mutation(cx, true);
-                if had_terminal_command && duplicated.command.is_none() {
+                if had_terminal_command && duplicated.command().is_none() {
                     let msg = if needs_sessions {
                         "Opened plain shell (could not derive next session name)"
                     } else {

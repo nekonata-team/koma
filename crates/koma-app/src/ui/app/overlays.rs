@@ -2,7 +2,7 @@
 
 use koma_app::domain::palette::{candidates, PaletteAction, PaletteItem, MAX_CANDIDATES};
 use koma_core::input::{parse_open_koma_input_with_engine, resolve_web_url_with_engine};
-use koma_core::model::{InputMode, KomaKind, KomaMeta, NotificationEntry};
+use koma_core::model::{InputMode, Koma, NotificationEntry};
 use makepad_widgets::*;
 
 use crate::runtime::profiles::{self, Profile};
@@ -34,7 +34,7 @@ impl App {
     }
 
     /// Raises a toast for a background-created Koma whose `Open` action jumps to it.
-    pub(super) fn show_created_koma_toast(&mut self, cx: &mut Cx, koma: &KomaMeta) {
+    pub(super) fn show_created_koma_toast(&mut self, cx: &mut Cx, koma: &Koma) {
         let sheet_label = koma
             .sheet_id
             .as_ref()
@@ -103,15 +103,11 @@ impl App {
             .drawer
             .iter()
             .map(|item| {
-                let detail = item
-                    .initial_url
-                    .as_deref()
-                    .or(item.cwd.as_deref())
-                    .unwrap_or("");
+                let detail = item.initial_url().or(item.cwd()).unwrap_or("");
                 let primary = if detail.is_empty() {
-                    format!("[{}] {}", item.kind.as_str(), item.label)
+                    format!("[{}] {}", item.kind_str(), item.label)
                 } else {
-                    format!("[{}] {} — {}", item.kind.as_str(), item.label, detail)
+                    format!("[{}] {} — {}", item.kind_str(), item.label, detail)
                 };
                 OverlayListItem {
                     primary,
@@ -312,14 +308,8 @@ impl App {
         let target_id = self
             .state
             .focused_koma()
-            .filter(|b| b.kind == KomaKind::Web)
-            .or_else(|| {
-                self.state
-                    .current_sheet()
-                    .komas
-                    .iter()
-                    .find(|b| b.kind == KomaKind::Web)
-            })
+            .filter(|b| b.is_web())
+            .or_else(|| self.state.current_sheet().komas.iter().find(|b| b.is_web()))
             .map(|b| b.id.clone());
 
         if let Some(koma_id) = target_id {

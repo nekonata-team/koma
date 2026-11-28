@@ -1,4 +1,4 @@
-use super::{KomaKind, KomaMeta, PersonalSheetPreset, WorkspaceState};
+use super::{Koma, KomaContent, PersonalSheetPreset, WorkspaceState};
 
 impl WorkspaceState {
     pub fn save_current_sheet_as_preset(
@@ -16,11 +16,11 @@ impl WorkspaceState {
         let komas: Vec<String> = sheet
             .komas
             .iter()
-            .filter_map(|b| match b.kind {
-                KomaKind::Web => b.initial_url.clone(),
-                KomaKind::Terminal => {
-                    let cwd = b.cwd.as_deref().filter(|s| !s.trim().is_empty());
-                    let cmd = b.command.as_deref().filter(|s| !s.trim().is_empty());
+            .map(|b| match &b.content {
+                KomaContent::Web { initial_url, .. } => initial_url.clone(),
+                KomaContent::Terminal { cwd, command } => {
+                    let cwd = cwd.as_deref().filter(|s| !s.trim().is_empty());
+                    let cmd = command.as_deref().filter(|s| !s.trim().is_empty());
                     let quote_cwd = |c: &str| {
                         if c.chars().any(char::is_whitespace) {
                             format!("\"{c}\"")
@@ -28,13 +28,12 @@ impl WorkspaceState {
                             c.to_string()
                         }
                     };
-                    let formatted = match (cwd, cmd) {
+                    match (cwd, cmd) {
                         (Some(c), Some(m)) => format!(":terminal {} {m}", quote_cwd(c)),
                         (Some(c), None) => format!(":terminal {}", quote_cwd(c)),
                         (None, Some(m)) => format!(":terminal {m}"),
                         (None, None) => ":terminal".into(),
-                    };
-                    Some(formatted)
+                    }
                 }
             })
             .collect();
@@ -63,7 +62,7 @@ impl WorkspaceState {
         inputs: &[String],
         home_dir: Option<&str>,
         new_sheet: bool,
-    ) -> Result<(usize, Vec<KomaMeta>), String> {
+    ) -> Result<(usize, Vec<Koma>), String> {
         let name = name.trim();
         if name.is_empty() {
             return Err("Preset name cannot be empty".into());
@@ -106,10 +105,10 @@ impl WorkspaceState {
                             .map(str::to_string)
                             .unwrap_or_else(|| "Shell".into()),
                     };
-                    self.insert_koma_with_command(KomaKind::Terminal, label, None, cwd, command);
+                    self.insert_koma_after_focused(label, KomaContent::terminal(cwd, command));
                 }
                 crate::input::KomaInput::Web { url, label } => {
-                    self.insert_koma_after_focused(KomaKind::Web, label, Some(url), None);
+                    self.insert_koma_after_focused(label, KomaContent::web(url));
                 }
             }
         }
@@ -124,13 +123,8 @@ mod tests {
     #[test]
     fn sheet_preset_saves_applies_and_stays_atomic_on_invalid_input() {
         let mut state = WorkspaceState::new();
-        state.insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None);
-        state.insert_koma_after_focused(
-            KomaKind::Web,
-            "Makepad".into(),
-            Some("https://makepad.nl".into()),
-            None,
-        );
+        state.insert_koma_after_focused("Shell".into(), KomaContent::terminal(None, None));
+        state.insert_koma_after_focused("Makepad".into(), KomaContent::web("https://makepad.nl"));
         let preset = state.save_current_sheet_as_preset("Work").unwrap();
         assert_eq!(preset.name, "Work");
         assert_eq!(
@@ -151,9 +145,9 @@ mod tests {
         assert!(removed.is_empty());
         assert_eq!(state.sheets[1].label, "Work");
         assert_eq!(state.sheets[1].komas.len(), 2);
-        assert_eq!(state.sheets[1].komas[0].kind, KomaKind::Terminal);
+        assert!(state.sheets[1].komas[0].is_terminal());
         assert_eq!(
-            state.sheets[1].komas[1].initial_url.as_deref(),
+            state.sheets[1].komas[1].initial_url(),
             Some("https://makepad.nl")
         );
     }
@@ -161,19 +155,16 @@ mod tests {
     #[test]
     fn sheet_preset_round_trips_terminal_cwd_with_whitespace() {
         let mut state = WorkspaceState::new();
-        state.insert_koma_with_command(
-            KomaKind::Terminal,
+        state.insert_koma_after_focused(
             "Spaces".into(),
-            None,
-            Some("/Users/test/My Projects".into()),
-            None,
+            KomaContent::terminal(Some("/Users/test/My Projects".into()), None),
         );
-        state.insert_koma_with_command(
-            KomaKind::Terminal,
+        state.insert_koma_after_focused(
             "SpacesCmd".into(),
-            None,
-            Some("/Users/test/My Projects".into()),
-            Some("cargo test".into()),
+            KomaContent::terminal(
+                Some("/Users/test/My Projects".into()),
+                Some("cargo test".into()),
+            ),
         );
 
         let preset = state.save_current_sheet_as_preset("Spaces").unwrap();
@@ -190,9 +181,9 @@ mod tests {
             .unwrap();
         let komas = &state.sheets[idx].komas;
         assert_eq!(komas.len(), 2);
-        assert_eq!(komas[0].cwd.as_deref(), Some("/Users/test/My Projects"));
-        assert_eq!(komas[0].command, None);
-        assert_eq!(komas[1].cwd.as_deref(), Some("/Users/test/My Projects"));
-        assert_eq!(komas[1].command.as_deref(), Some("cargo test"));
+        assert_eq!(komas[0].cwd(), Some("/Users/test/My Projects"));
+        assert_eq!(komas[0].command(), None);
+        assert_eq!(komas[1].cwd(), Some("/Users/test/My Projects"));
+        assert_eq!(komas[1].command(), Some("cargo test"));
     }
 }

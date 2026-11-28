@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use koma_core::model::{InputMode, KomaId, KomaKind};
+use koma_core::model::{InputMode, KomaId};
 use makepad_widgets::makepad_draw::DrawList2d;
 use makepad_widgets::*;
 
@@ -383,7 +383,7 @@ impl SheetStrip {
                             hovered: is_hovered,
                         },
                     );
-                    if slot.kind == KomaKind::Web {
+                    if slot.content.is_web() {
                         visible_web_ids.insert(&slot.koma_id);
                     }
                     cx.pop_clip_rect();
@@ -421,7 +421,7 @@ impl SheetStrip {
             let mut rt = rt.borrow_mut();
             for sheet in &self.sheets {
                 for slot in &sheet.komas {
-                    if slot.kind == KomaKind::Web {
+                    if slot.content.is_web() {
                         rt.set_koma_hidden(
                             cx,
                             &slot.koma_id,

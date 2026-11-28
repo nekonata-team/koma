@@ -6,15 +6,15 @@ use koma_app::domain::sheet_presets::available_sheet_presets;
 use koma_core::input::{
     expand_tilde, parse_open_koma_input_with_engine, resolve_web_url_with_engine, KomaInput,
 };
-use koma_core::model::{InsertKomaOptions, KomaId, KomaKind, KomaMeta, SheetId, SheetState};
+use koma_core::model::{InsertKomaOptions, Koma, KomaContent, KomaId, SheetId, SheetState};
 use koma_ipc::protocol::{
-    DrawerCommand, DrawerItemSummary, DrawerKeepArgs, IpcCommand, IpcPayload, IpcResponse,
-    KomaCommand, KomaFocusedData, KomaPlacement, KomaSummary, KomaTarget, KomaTextArgs,
-    NotificationCommand, NotificationListArgs, NotificationSendArgs, NotificationSummary,
-    PresetSummary, SheetCloseArgs, SheetCommand, SheetListEntry, SheetSummary, TerminalCommand,
-    TerminalNewArgs, TerminalTextArgs, WebClickArgs, WebCommand, WebEvalArgs, WebFillArgs,
-    WebKomaData, WebNavigateArgs, WebNewArgs, WebReadArgs, WebReloadArgs, WebSnapshotArgs,
-    WorkspaceCommand, WorkspaceEndpoint,
+    DrawerCommand, DrawerItemContent, DrawerItemSummary, DrawerKeepArgs, IpcCommand, IpcPayload,
+    IpcResponse, KomaCommand, KomaFocusedData, KomaPlacement, KomaSummary, KomaSummaryContent,
+    KomaTarget, KomaTextArgs, NotificationCommand, NotificationListArgs, NotificationSendArgs,
+    NotificationSummary, PresetSummary, SheetCloseArgs, SheetCommand, SheetListEntry, SheetSummary,
+    TerminalCommand, TerminalNewArgs, TerminalTextArgs, WebClickArgs, WebCommand, WebEvalArgs,
+    WebFillArgs, WebKomaData, WebNavigateArgs, WebNewArgs, WebReadArgs, WebReloadArgs,
+    WebSnapshotArgs, WorkspaceCommand, WorkspaceEndpoint,
 };
 use makepad_app_terminal::widget::MpTerm;
 use makepad_widgets::*;
@@ -40,13 +40,17 @@ fn validate_koma_api_url(enabled: bool, url: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn summarize_koma(rt: &WebViewRuntime, sheet: &SheetState, koma: &KomaMeta) -> KomaSummary {
-    let url = latest_web_url_with(rt, koma);
+fn summarize_koma(rt: &WebViewRuntime, sheet: &SheetState, koma: &Koma) -> KomaSummary {
+    let content = match &koma.content {
+        KomaContent::Terminal { .. } => KomaSummaryContent::Terminal,
+        KomaContent::Web { initial_url, .. } => KomaSummaryContent::Web {
+            url: latest_web_url_with(rt, koma).unwrap_or_else(|| initial_url.clone()),
+        },
+    };
     KomaSummary {
         id: koma.id.to_string(),
-        kind: koma.kind.as_str().into(),
         label: koma.label.clone(),
-        url,
+        content,
         is_focused: sheet.focused_koma_id.as_ref() == Some(&koma.id),
     }
 }
@@ -295,9 +299,10 @@ impl App {
                 send_result(
                     reply,
                     self.open_devtools_for_focused_web(cx).map(|koma| {
+                        let url = koma.initial_url().map(str::to_owned);
                         IpcPayload::WebKoma(WebKomaData {
                             koma_id: koma.id.into_string(),
-                            url: koma.initial_url,
+                            url,
                         })
                     }),
                 );
@@ -579,11 +584,7 @@ impl App {
             TerminalCommand::Text(TerminalTextArgs { koma_id, lines }) => {
                 let koma_id = self
                     .state
-                    .resolve_koma(
-                        koma_id.map(KomaId::from).as_ref(),
-                        caller,
-                        KomaKind::Terminal,
-                    )?
+                    .resolve_terminal(koma_id.map(KomaId::from).as_ref(), caller)?
                     .id
                     .clone();
                 let fetch_lines = lines.map(|n| n.saturating_add(80));
@@ -599,11 +600,7 @@ impl App {
             TerminalCommand::Send(KomaTextArgs { koma_id, text }) => {
                 let koma_id = self
                     .state
-                    .resolve_koma(
-                        koma_id.map(KomaId::from).as_ref(),
-                        caller,
-                        KomaKind::Terminal,
-                    )?
+                    .resolve_terminal(koma_id.map(KomaId::from).as_ref(), caller)?
                     .id
                     .clone();
                 let sent = self
@@ -628,10 +625,15 @@ impl App {
                     .iter()
                     .map(|b| DrawerItemSummary {
                         id: b.id.to_string(),
-                        kind: b.kind.as_str().into(),
                         label: b.label.clone(),
-                        url: b.initial_url.clone(),
-                        cwd: b.cwd.clone(),
+                        content: match &b.content {
+                            KomaContent::Terminal { cwd, .. } => {
+                                DrawerItemContent::Terminal { cwd: cwd.clone() }
+                            }
+                            KomaContent::Web { initial_url, .. } => DrawerItemContent::Web {
+                                url: initial_url.clone(),
+                            },
+                        },
                     })
                     .collect();
                 Ok(IpcPayload::DrawerList { items })
@@ -650,13 +652,9 @@ impl App {
                 )? {
                     KomaInput::Terminal { cwd, .. } => {
                         let label = title.unwrap_or_else(|| derive_cwd_label(cwd.as_deref()));
-                        let item = self.state.keep_koma_in_drawer(
-                            KomaKind::Terminal,
-                            label,
-                            None,
-                            cwd,
-                            false,
-                        );
+                        let item = self
+                            .state
+                            .keep_koma_in_drawer(label, KomaContent::terminal(cwd, None));
                         self.sync_after_mutation(cx, false);
                         Ok(IpcPayload::KomaId {
                             koma_id: item.id.into_string(),
@@ -665,11 +663,11 @@ impl App {
                     KomaInput::Web { url, label } => {
                         validate_koma_api_url(koma_api, &url)?;
                         let item = self.state.keep_koma_in_drawer(
-                            KomaKind::Web,
                             title.unwrap_or(label),
-                            Some(url.clone()),
-                            None,
-                            koma_api,
+                            KomaContent::Web {
+                                initial_url: url.clone(),
+                                koma_api_enabled: koma_api,
+                            },
                         );
                         if koma_api {
                             self.web_runtime()
@@ -840,11 +838,9 @@ impl App {
         caller: Option<&KomaId>,
         operation: impl FnOnce(&mut MpTerm, &mut Cx, &str) -> Result<(), String>,
     ) -> Result<IpcPayload, String> {
-        let koma = self.state.resolve_koma(
-            args.koma_id.map(KomaId::from).as_ref(),
-            caller,
-            KomaKind::Terminal,
-        )?;
+        let koma = self
+            .state
+            .resolve_terminal(args.koma_id.map(KomaId::from).as_ref(), caller)?;
         self.with_terminal_from_ipc(cx, &koma.id, |cx, term| operation(term, cx, &args.text))?;
         Ok(IpcPayload::KomaId {
             koma_id: koma.id.to_string(),
@@ -926,11 +922,7 @@ impl App {
         caller_koma_id: Option<&KomaId>,
     ) -> Result<KomaId, String> {
         self.state
-            .resolve_koma(
-                koma_id.map(KomaId::from).as_ref(),
-                caller_koma_id,
-                KomaKind::Web,
-            )
+            .resolve_web(koma_id.map(KomaId::from).as_ref(), caller_koma_id)
             .map(|b| b.id.clone())
     }
 }

@@ -3,7 +3,6 @@ use std::rc::Rc;
 
 use koma_app::config::{self, Config};
 use koma_app::{ghostty_config, persistence};
-use koma_core::model::KomaKind;
 use koma_ipc::transport::resolve_socket_path;
 use makepad_widgets::*;
 
@@ -244,7 +243,7 @@ impl App {
                 .flat_map(|d| d.komas.iter())
                 .chain(self.state.drawer.iter())
             {
-                if koma.kind == KomaKind::Web && koma.koma_api_enabled {
+                if koma.koma_api_enabled() {
                     rt.set_koma_api_enabled(cx, &koma.id, true);
                 }
             }

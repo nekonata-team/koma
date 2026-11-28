@@ -30,17 +30,44 @@ pub struct PersonalSheetPreset {
     pub komas: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum KomaKind {
-    Terminal,
-    Web,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KomaContent {
+    Terminal {
+        /// Absent until a path is given or reported by the shell (OSC 7).
+        cwd: Option<String>,
+        command: Option<String>,
+    },
+    Web {
+        initial_url: String,
+        /// Whether `window.koma` API injection is enabled on local HTML pages.
+        koma_api_enabled: bool,
+    },
 }
 
-impl KomaKind {
-    pub fn as_str(self) -> &'static str {
+impl KomaContent {
+    pub fn kind_str(&self) -> &'static str {
         match self {
-            Self::Terminal => "terminal",
-            Self::Web => "web",
+            Self::Terminal { .. } => "terminal",
+            Self::Web { .. } => "web",
+        }
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Terminal { .. })
+    }
+
+    pub fn is_web(&self) -> bool {
+        matches!(self, Self::Web { .. })
+    }
+
+    pub fn terminal(cwd: Option<String>, command: Option<String>) -> Self {
+        Self::Terminal { cwd, command }
+    }
+
+    pub fn web(initial_url: impl Into<String>) -> Self {
+        Self::Web {
+            initial_url: initial_url.into(),
+            koma_api_enabled: false,
         }
     }
 }
@@ -53,24 +80,19 @@ pub enum InputMode {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct KomaMeta {
+pub struct Koma {
     pub id: KomaId,
     /// Absent while the Koma is in the Drawer.
     pub sheet_id: Option<SheetId>,
     pub profile_id: String,
-    pub kind: KomaKind,
     pub label: String,
-    pub initial_url: Option<String>,
-    pub cwd: Option<String>,
-    pub command: Option<String>,
+    pub content: KomaContent,
     /// Pixel width used when `ratio` is `None`.
     pub width: f64,
     /// Fraction of the strip's usable width; follows window resizes when set.
     pub ratio: Option<f64>,
     /// Sizing saved while maximized (`ratio == Some(1.0)`).
     pub restore: Option<(f64, Option<f64>)>,
-    /// Whether `window.koma` API injection is enabled on local HTML pages.
-    pub koma_api_enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -82,52 +104,67 @@ pub struct NotificationEntry {
     pub unread: bool,
 }
 
-impl KomaMeta {
-    pub fn new_web(
+impl Koma {
+    pub fn new(
         id: KomaId,
         sheet_id: Option<SheetId>,
         profile_id: String,
         label: String,
-        initial_url: Option<String>,
+        content: KomaContent,
     ) -> Self {
         Self {
             id,
             sheet_id,
             profile_id,
-            kind: KomaKind::Web,
             label,
-            initial_url,
-            cwd: None,
-            command: None,
+            content,
             width: DEFAULT_KOMA_WIDTH,
             ratio: None,
             restore: None,
-            koma_api_enabled: false,
         }
     }
 
-    pub fn new_terminal(
-        id: KomaId,
-        sheet_id: Option<SheetId>,
-        profile_id: String,
-        label: String,
-        cwd: Option<String>,
-        command: Option<String>,
-    ) -> Self {
-        Self {
-            id,
-            sheet_id,
-            profile_id,
-            kind: KomaKind::Terminal,
-            label,
-            initial_url: None,
-            cwd,
-            command,
-            width: DEFAULT_KOMA_WIDTH,
-            ratio: None,
-            restore: None,
-            koma_api_enabled: false,
+    pub fn kind_str(&self) -> &'static str {
+        self.content.kind_str()
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        self.content.is_terminal()
+    }
+
+    pub fn is_web(&self) -> bool {
+        self.content.is_web()
+    }
+
+    pub fn initial_url(&self) -> Option<&str> {
+        match &self.content {
+            KomaContent::Web { initial_url, .. } => Some(initial_url.as_str()),
+            KomaContent::Terminal { .. } => None,
         }
+    }
+
+    pub fn cwd(&self) -> Option<&str> {
+        match &self.content {
+            KomaContent::Terminal { cwd, .. } => cwd.as_deref(),
+            KomaContent::Web { .. } => None,
+        }
+    }
+
+    pub fn command(&self) -> Option<&str> {
+        match &self.content {
+            KomaContent::Terminal { command, .. } => command.as_deref(),
+            KomaContent::Web { .. } => None,
+        }
+    }
+
+    pub fn koma_api_enabled(&self) -> bool {
+        matches!(
+            self.content,
+            KomaContent::Web {
+                koma_api_enabled: true,
+                ..
+            }
+        )
     }
 
     /// Niri-style proportion: `n` equal komas plus gaps exactly fill `usable`.
@@ -144,7 +181,7 @@ pub struct SheetState {
     pub id: SheetId,
     pub label: String,
     pub focused_koma_id: Option<KomaId>,
-    pub komas: Vec<KomaMeta>,
+    pub komas: Vec<Koma>,
 }
 
 impl SheetState {
@@ -155,7 +192,7 @@ impl SheetState {
             .or_else(|| (!self.komas.is_empty()).then_some(0))
     }
 
-    pub fn focused_koma(&self) -> Option<&KomaMeta> {
+    pub fn focused_koma(&self) -> Option<&Koma> {
         self.focused_index().and_then(|idx| self.komas.get(idx))
     }
 }
@@ -169,9 +206,9 @@ pub struct WorkspaceState {
     sheets: Vec<SheetState>,
     pub next_koma_seq: usize,
     pub next_sheet_seq: usize,
-    pub drawer: Vec<KomaMeta>,
-    pub discarded_drawer: Vec<KomaMeta>,
-    closed_komas: Vec<(usize, KomaMeta)>,
+    pub drawer: Vec<Koma>,
+    pub discarded_drawer: Vec<Koma>,
+    closed_komas: Vec<(usize, Koma)>,
     pub drawer_open: bool,
     pub drawer_selected: usize,
     pub notifications: Vec<NotificationEntry>,
@@ -255,7 +292,7 @@ impl WorkspaceState {
         &mut self.sheets[self.active_sheet]
     }
 
-    pub fn focused_koma(&self) -> Option<&KomaMeta> {
+    pub fn focused_koma(&self) -> Option<&Koma> {
         self.current_sheet().focused_koma()
     }
 
@@ -534,62 +571,29 @@ impl WorkspaceState {
         true
     }
 
-    pub fn insert_koma_after_focused(
-        &mut self,
-        kind: KomaKind,
-        label: String,
-        initial_url: Option<String>,
-        cwd: Option<String>,
-    ) -> KomaMeta {
-        self.insert_koma_with_command(kind, label, initial_url, cwd, None)
-    }
-
-    pub fn insert_koma_with_command(
-        &mut self,
-        kind: KomaKind,
-        label: String,
-        initial_url: Option<String>,
-        cwd: Option<String>,
-        command: Option<String>,
-    ) -> KomaMeta {
-        self.insert_koma_after(kind, label, initial_url, cwd, command, None)
-            .0
+    pub fn insert_koma_after_focused(&mut self, label: String, spec: KomaContent) -> Koma {
+        self.insert_koma_after(label, spec, None).0
     }
 
     /// Inserts a Koma after `caller` on `caller`'s Sheet when present, or after the
     /// active Sheet's focused Koma. Returns `(koma, focused_in_active_sheet)`.
     pub fn insert_koma_after(
         &mut self,
-        kind: KomaKind,
         label: String,
-        initial_url: Option<String>,
-        cwd: Option<String>,
-        command: Option<String>,
+        spec: KomaContent,
         caller: Option<&KomaId>,
-    ) -> (KomaMeta, bool) {
-        self.insert_koma_with_options(
-            kind,
-            label,
-            initial_url,
-            cwd,
-            command,
-            caller,
-            InsertKomaOptions::default(),
-        )
-        .expect("default InsertKomaOptions is always valid")
+    ) -> (Koma, bool) {
+        self.insert_koma_with_options(label, spec, caller, InsertKomaOptions::default())
+            .expect("default InsertKomaOptions is always valid")
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn insert_koma_with_options(
         &mut self,
-        kind: KomaKind,
         label: String,
-        initial_url: Option<String>,
-        cwd: Option<String>,
-        command: Option<String>,
+        spec: KomaContent,
         caller: Option<&KomaId>,
         opts: InsertKomaOptions,
-    ) -> Result<(KomaMeta, bool), String> {
+    ) -> Result<(Koma, bool), String> {
         let width = match opts.width {
             Some(w) if !w.is_finite() || w <= 0.0 => {
                 return Err("Koma width must be finite and positive".into());
@@ -633,23 +637,7 @@ impl WorkspaceState {
         let profile_id = self.profile_id.clone();
         let sheet = &mut self.sheets[sheet_idx];
         let was_empty = sheet.komas.is_empty();
-        let mut koma = match kind {
-            KomaKind::Web => KomaMeta::new_web(
-                id.clone(),
-                Some(sheet.id.clone()),
-                profile_id,
-                label,
-                initial_url,
-            ),
-            KomaKind::Terminal => KomaMeta::new_terminal(
-                id.clone(),
-                Some(sheet.id.clone()),
-                profile_id,
-                label,
-                cwd,
-                command,
-            ),
-        };
+        let mut koma = Koma::new(id.clone(), Some(sheet.id.clone()), profile_id, label, spec);
         koma.width = width;
         sheet.komas.insert(insert_idx, koma.clone());
         if should_focus || was_empty {
@@ -666,21 +654,19 @@ impl WorkspaceState {
         session_prefixes: &[String],
         extra_session_names: &[String],
         live_url: Option<String>,
-    ) -> Result<KomaMeta, String> {
+    ) -> Result<Koma, String> {
         let koma = self
             .focused_koma()
             .cloned()
             .ok_or_else(|| "No focused koma to duplicate".to_string())?;
-        match koma.kind {
-            KomaKind::Web => {
-                let url = live_url
-                    .or(koma.initial_url)
-                    .ok_or_else(|| "Web koma has no URL to duplicate".to_string())?;
+        match koma.content {
+            KomaContent::Web { initial_url, .. } => {
+                let url = live_url.unwrap_or(initial_url);
                 let label = crate::input::derive_url_label(&url);
-                Ok(self.insert_koma_after_focused(KomaKind::Web, label, Some(url), None))
+                Ok(self.insert_koma_after_focused(label, KomaContent::web(url)))
             }
-            KomaKind::Terminal => {
-                let command = koma.command.as_deref().and_then(|cmd| {
+            KomaContent::Terminal { cwd, command } => {
+                let command = command.as_deref().and_then(|cmd| {
                     self.next_session_command(cmd, session_prefixes, extra_session_names)
                 });
                 let label = if let Some(cmd) = &command {
@@ -691,13 +677,7 @@ impl WorkspaceState {
                 } else {
                     koma.label.clone()
                 };
-                Ok(self.insert_koma_with_command(
-                    KomaKind::Terminal,
-                    label,
-                    None,
-                    koma.cwd,
-                    command,
-                ))
+                Ok(self.insert_koma_after_focused(label, KomaContent::terminal(cwd, command)))
             }
         }
     }
@@ -731,7 +711,7 @@ impl WorkspaceState {
                     .iter()
                     .flat_map(|d| d.komas.iter())
                     .chain(self.drawer.iter())
-                    .any(|b| b.command.as_deref() == Some(candidate.as_str()));
+                    .any(|b| b.command() == Some(candidate.as_str()));
             if !used {
                 return Some(candidate);
             }
@@ -739,16 +719,16 @@ impl WorkspaceState {
         None
     }
 
-    fn remove_focused_koma(&mut self) -> Option<KomaMeta> {
+    fn remove_focused_koma(&mut self) -> Option<Koma> {
         let id = self.current_sheet().focused_koma_id.clone()?;
         self.remove_koma_by_id(&id)
     }
 
-    fn remove_koma_by_id(&mut self, koma_id: &KomaId) -> Option<KomaMeta> {
+    fn remove_koma_by_id(&mut self, koma_id: &KomaId) -> Option<Koma> {
         self.take_koma(koma_id, false).map(|(_, koma)| koma)
     }
 
-    fn take_koma(&mut self, koma_id: &KomaId, prefer_left: bool) -> Option<(usize, KomaMeta)> {
+    fn take_koma(&mut self, koma_id: &KomaId, prefer_left: bool) -> Option<(usize, Koma)> {
         for sheet in &mut self.sheets {
             if let Some(idx) = sheet.komas.iter().position(|b| &b.id == koma_id) {
                 let removed = sheet.komas.remove(idx);
@@ -795,13 +775,12 @@ impl WorkspaceState {
         if with_default_terminal {
             let koma_id = self.allocate_koma_id();
             focused_koma_id = Some(koma_id.clone());
-            komas.push(KomaMeta::new_terminal(
+            komas.push(Koma::new(
                 koma_id,
                 Some(sheet_id.clone()),
                 self.profile_id.clone(),
                 "Shell".into(),
-                None,
-                None,
+                KomaContent::terminal(None, None),
             ));
         }
         self.sheets.push(SheetState {
@@ -860,11 +839,11 @@ impl WorkspaceState {
         let Some(koma) = self.koma_by_id_mut(koma_id) else {
             return false;
         };
-        if koma.kind != KomaKind::Web {
+        let KomaContent::Web { initial_url, .. } = &mut koma.content else {
             return false;
-        }
-        let mut changed = koma.initial_url.as_deref() != Some(url.as_str());
-        koma.initial_url = Some(url);
+        };
+        let mut changed = *initial_url != url;
+        *initial_url = url;
         if let Some(new_label) = label.filter(|l| !l.trim().is_empty()) {
             if koma.label != new_label {
                 koma.label = new_label;
@@ -885,7 +864,13 @@ impl WorkspaceState {
             .iter_mut()
             .flat_map(|sheet| &mut sheet.komas)
             .chain(&mut self.drawer)
-            .find(|koma| &koma.id == id && koma.kind == KomaKind::Terminal)
+            .find(|koma| &koma.id == id)
+        else {
+            return false;
+        };
+        let KomaContent::Terminal {
+            cwd: terminal_cwd, ..
+        } = &mut koma.content
         else {
             return false;
         };
@@ -895,14 +880,14 @@ impl WorkspaceState {
             koma.label = label;
             changed = true;
         }
-        if let Some(cwd) = cwd.filter(|cwd| koma.cwd.as_ref() != Some(cwd)) {
-            koma.cwd = Some(cwd);
+        if let Some(cwd) = cwd.filter(|cwd| terminal_cwd.as_ref() != Some(cwd)) {
+            *terminal_cwd = Some(cwd);
             changed = true;
         }
         changed
     }
 
-    pub fn koma_by_id(&self, id: &KomaId) -> Option<&KomaMeta> {
+    pub fn koma_by_id(&self, id: &KomaId) -> Option<&Koma> {
         self.sheets
             .iter()
             .flat_map(|d| d.komas.iter())
@@ -910,50 +895,77 @@ impl WorkspaceState {
     }
 
     pub fn set_koma_api_enabled(&mut self, id: &KomaId, enabled: bool) {
-        if let Some(koma) = self.koma_by_id_mut(id).filter(|b| b.kind == KomaKind::Web) {
-            koma.koma_api_enabled = enabled;
+        if let Some(koma) = self.koma_by_id_mut(id) {
+            if let KomaContent::Web {
+                koma_api_enabled, ..
+            } = &mut koma.content
+            {
+                *koma_api_enabled = enabled;
+            }
         }
     }
 
-    fn koma_by_id_mut(&mut self, id: &KomaId) -> Option<&mut KomaMeta> {
+    fn koma_by_id_mut(&mut self, id: &KomaId) -> Option<&mut Koma> {
         self.sheets
             .iter_mut()
             .flat_map(|d| d.komas.iter_mut())
             .find(|b| &b.id == id)
     }
 
-    pub fn sheet_web_koma(&self, sheet_idx: usize) -> Option<&KomaMeta> {
+    pub fn sheet_web_koma(&self, sheet_idx: usize) -> Option<&Koma> {
         self.sheets
             .get(sheet_idx)?
             .komas
             .iter()
-            .find(|b| b.kind == KomaKind::Web)
+            .find(|b| b.is_web())
     }
 
-    pub fn sheet_terminal_koma(&self, sheet_idx: usize) -> Option<&KomaMeta> {
+    pub fn sheet_terminal_koma(&self, sheet_idx: usize) -> Option<&Koma> {
         self.sheets
             .get(sheet_idx)?
             .komas
             .iter()
-            .find(|b| b.kind == KomaKind::Terminal)
+            .find(|b| b.is_terminal())
     }
 
-    /// Resolves a target Koma using explicit ID, ambient `KOMA_KOMA_ID`, or active Sheet.
-    pub fn resolve_koma(
+    /// Resolves a target Web Koma using explicit ID, ambient `KOMA_KOMA_ID`, or active Sheet.
+    pub fn resolve_web(
         &self,
         explicit_koma_id: Option<&KomaId>,
         caller_koma_id: Option<&KomaId>,
-        target_kind: KomaKind,
-    ) -> Result<&KomaMeta, String> {
+    ) -> Result<&Koma, String> {
+        self.resolve_koma_matching(explicit_koma_id, caller_koma_id, "web", Koma::is_web)
+    }
+
+    /// Resolves a target Terminal Koma using explicit ID, ambient `KOMA_KOMA_ID`, or active Sheet.
+    pub fn resolve_terminal(
+        &self,
+        explicit_koma_id: Option<&KomaId>,
+        caller_koma_id: Option<&KomaId>,
+    ) -> Result<&Koma, String> {
+        self.resolve_koma_matching(
+            explicit_koma_id,
+            caller_koma_id,
+            "terminal",
+            Koma::is_terminal,
+        )
+    }
+
+    fn resolve_koma_matching(
+        &self,
+        explicit_koma_id: Option<&KomaId>,
+        caller_koma_id: Option<&KomaId>,
+        expected_kind: &'static str,
+        matches: fn(&Koma) -> bool,
+    ) -> Result<&Koma, String> {
         if let Some(id) = explicit_koma_id {
             let koma = self
                 .koma_by_id(id)
                 .ok_or_else(|| format!("Koma not found: {id}"))?;
-            if koma.kind != target_kind {
+            if !matches(koma) {
                 return Err(format!(
-                    "Koma {id} is {} (expected {})",
-                    koma.kind.as_str(),
-                    target_kind.as_str()
+                    "Koma {id} is {} (expected {expected_kind})",
+                    koma.kind_str(),
                 ));
             }
             return Ok(koma);
@@ -965,20 +977,18 @@ impl WorkspaceState {
                 .iter()
                 .find(|d| d.komas.iter().any(|b| &b.id == caller_id))
             {
-                if target_kind == KomaKind::Terminal {
-                    if let Some(caller) = sheet
-                        .komas
-                        .iter()
-                        .find(|b| &b.id == caller_id && b.kind == KomaKind::Terminal)
-                    {
-                        return Ok(caller);
-                    }
+                if let Some(caller) = sheet
+                    .komas
+                    .iter()
+                    .find(|b| &b.id == caller_id && matches(b))
+                {
+                    return Ok(caller);
                 }
-                return resolve_in_sheet(sheet, target_kind);
+                return resolve_in_sheet(sheet, expected_kind, matches);
             }
         }
 
-        resolve_in_sheet(self.current_sheet(), target_kind)
+        resolve_in_sheet(self.current_sheet(), expected_kind, matches)
     }
 
     fn allocate_koma_id(&mut self) -> KomaId {
@@ -1015,17 +1025,21 @@ fn step_index(current: usize, len: usize, delta: isize) -> usize {
     next as usize
 }
 
-fn resolve_in_sheet(sheet: &SheetState, target_kind: KomaKind) -> Result<&KomaMeta, String> {
+fn resolve_in_sheet<'a>(
+    sheet: &'a SheetState,
+    expected_kind: &'static str,
+    matches: fn(&Koma) -> bool,
+) -> Result<&'a Koma, String> {
     if let Some(focused) = sheet.focused_koma() {
-        if focused.kind == target_kind {
+        if matches(focused) {
             return Ok(focused);
         }
     }
     sheet
         .komas
         .iter()
-        .find(|b| b.kind == target_kind)
-        .ok_or_else(|| format!("No {} koma on sheet {}", target_kind.as_str(), sheet.id))
+        .find(|b| matches(b))
+        .ok_or_else(|| format!("No {expected_kind} koma on sheet {}", sheet.id))
 }
 
 #[cfg(test)]
@@ -1036,46 +1050,21 @@ mod tests {
     fn ambient_targeting_follows_caller_sheet() {
         let mut state = WorkspaceState::new();
         let s1_term = state
-            .insert_koma_after_focused(KomaKind::Terminal, "Shell 1".into(), None, None)
+            .insert_koma_after_focused("Shell 1".into(), KomaContent::terminal(None, None))
             .id;
         let s1_web = state
-            .insert_koma_after_focused(
-                KomaKind::Web,
-                "Web 1".into(),
-                Some("https://example.com".into()),
-                None,
-            )
+            .insert_koma_after_focused("Web 1".into(), KomaContent::web("https://example.com"))
             .id;
         state.add_sheet(true);
         let s2_term = state.focused_koma().unwrap().id.clone();
         let s2_web = state
-            .insert_koma_after_focused(
-                KomaKind::Web,
-                "Web 2".into(),
-                Some("https://example.org".into()),
-                None,
-            )
+            .insert_koma_after_focused("Web 2".into(), KomaContent::web("https://example.org"))
             .id;
 
+        assert_eq!(state.resolve_web(None, Some(&s1_term)).unwrap().id, s1_web);
+        assert_eq!(state.resolve_web(None, Some(&s2_term)).unwrap().id, s2_web);
         assert_eq!(
-            state
-                .resolve_koma(None, Some(&s1_term), KomaKind::Web)
-                .unwrap()
-                .id,
-            s1_web
-        );
-        assert_eq!(
-            state
-                .resolve_koma(None, Some(&s2_term), KomaKind::Web)
-                .unwrap()
-                .id,
-            s2_web
-        );
-        assert_eq!(
-            state
-                .resolve_koma(None, Some(&s2_term), KomaKind::Terminal)
-                .unwrap()
-                .id,
+            state.resolve_terminal(None, Some(&s2_term)).unwrap().id,
             s2_term
         );
     }
@@ -1084,58 +1073,39 @@ mod tests {
     fn explicit_koma_overrides_ambient_and_rejects_mismatch() {
         let mut state = WorkspaceState::new();
         let s1_term = state
-            .insert_koma_after_focused(KomaKind::Terminal, "Shell 1".into(), None, None)
+            .insert_koma_after_focused("Shell 1".into(), KomaContent::terminal(None, None))
             .id;
         state.add_sheet(false);
         let s2_web = state
-            .insert_koma_after_focused(
-                KomaKind::Web,
-                "Web 2".into(),
-                Some("https://example.com".into()),
-                None,
-            )
+            .insert_koma_after_focused("Web 2".into(), KomaContent::web("https://example.com"))
             .id;
 
         assert_eq!(
-            state
-                .resolve_koma(Some(&s2_web), Some(&s1_term), KomaKind::Web)
-                .unwrap()
-                .id,
+            state.resolve_web(Some(&s2_web), Some(&s1_term)).unwrap().id,
             s2_web
         );
         assert!(state
-            .resolve_koma(Some(&"missing".into()), Some(&s1_term), KomaKind::Web)
+            .resolve_web(Some(&"missing".into()), Some(&s1_term))
             .is_err());
-        assert!(state
-            .resolve_koma(Some(&s1_term), Some(&s1_term), KomaKind::Web)
-            .is_err());
+        assert!(state.resolve_web(Some(&s1_term), Some(&s1_term)).is_err());
     }
 
     #[test]
     fn koma_insertion_focus_reorder_resize_and_removal_update_sheet() {
         let mut state = WorkspaceState::new();
         let s1_term = state
-            .insert_koma_after_focused(KomaKind::Terminal, "Shell 1".into(), None, None)
+            .insert_koma_after_focused("Shell 1".into(), KomaContent::terminal(None, None))
             .id;
         let s1_web = state
-            .insert_koma_after_focused(
-                KomaKind::Web,
-                "Web 1".into(),
-                Some("https://example.com".into()),
-                None,
-            )
+            .insert_koma_after_focused("Web 1".into(), KomaContent::web("https://example.com"))
             .id;
         state.add_sheet(true);
         let s2_term = state.focused_koma().unwrap().id.clone();
         state.focus_koma_by_id(&s1_term);
         assert_eq!(state.focused_koma().unwrap().id, s1_term);
 
-        let created = state.insert_koma_after_focused(
-            KomaKind::Web,
-            "Docs".into(),
-            Some("https://docs.rs".into()),
-            None,
-        );
+        let created =
+            state.insert_koma_after_focused("Docs".into(), KomaContent::web("https://docs.rs"));
         let ids: Vec<&KomaId> = state.current_sheet().komas.iter().map(|b| &b.id).collect();
         assert_eq!(ids, vec![&s1_term, &created.id, &s1_web]);
         assert_eq!(state.focused_koma().unwrap().id, created.id);
@@ -1167,9 +1137,10 @@ mod tests {
         assert!(state.remove_koma_by_id(&s2_term).is_none());
 
         // Closing with prefer-left focuses the left neighbor when one exists.
-        let right = state.insert_koma_after_focused(KomaKind::Terminal, "Right".into(), None, None);
+        let right =
+            state.insert_koma_after_focused("Right".into(), KomaContent::terminal(None, None));
         let middle =
-            state.insert_koma_after_focused(KomaKind::Terminal, "Middle".into(), None, None);
+            state.insert_koma_after_focused("Middle".into(), KomaContent::terminal(None, None));
         assert_eq!(state.focused_koma().unwrap().id, middle.id);
         let id = state.focused_koma().unwrap().id.clone();
         state.close_koma(&id, true);
@@ -1180,7 +1151,7 @@ mod tests {
     fn width_presets_cycle_maximize_toggles_and_resize_clears_ratio() {
         let mut state = WorkspaceState::new();
         let term = state
-            .insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None)
+            .insert_koma_after_focused("Shell".into(), KomaContent::terminal(None, None))
             .id;
         let presets = DEFAULT_WIDTH_PRESETS;
         assert!(state.cycle_width_preset(&presets));
@@ -1234,7 +1205,7 @@ mod tests {
         assert_eq!(idx, 2);
         assert_eq!(state.active_sheet, 2);
         assert_eq!(state.current_sheet().komas.len(), 1);
-        assert_eq!(state.focused_koma().unwrap().kind, KomaKind::Terminal);
+        assert!(state.focused_koma().unwrap().is_terminal());
 
         assert!(state.switch_sheet_relative(1, true));
         assert_eq!(state.active_sheet, 0);
@@ -1247,25 +1218,15 @@ mod tests {
     fn move_focused_koma_to_sheet_and_position_updates_sheets_cleanly() {
         let mut state = WorkspaceState::new();
         let s1_term = state
-            .insert_koma_after_focused(KomaKind::Terminal, "Shell 1".into(), None, None)
+            .insert_koma_after_focused("Shell 1".into(), KomaContent::terminal(None, None))
             .id;
         let s1_web = state
-            .insert_koma_after_focused(
-                KomaKind::Web,
-                "Web 1".into(),
-                Some("https://example.com".into()),
-                None,
-            )
+            .insert_koma_after_focused("Web 1".into(), KomaContent::web("https://example.com"))
             .id;
         state.add_sheet(true);
         let s2_term = state.focused_koma().unwrap().id.clone();
         let s2_web = state
-            .insert_koma_after_focused(
-                KomaKind::Web,
-                "Web 2".into(),
-                Some("https://example.org".into()),
-                None,
-            )
+            .insert_koma_after_focused("Web 2".into(), KomaContent::web("https://example.org"))
             .id;
         state.focus_koma_by_id(&s2_term);
         state.focus_koma_by_id(&s1_term);
@@ -1331,42 +1292,36 @@ mod tests {
     #[test]
     fn duplicate_koma_applies_session_prefixes_or_opens_plain_shell() {
         let mut state = WorkspaceState::new();
-        state.insert_koma_with_command(
-            KomaKind::Terminal,
+        state.insert_koma_after_focused(
             "dev".into(),
-            None,
-            Some("/tmp".into()),
-            Some("zmx attach dev".into()),
+            KomaContent::terminal(Some("/tmp".into()), Some("zmx attach dev".into())),
         );
         let prefixes = vec!["zmx attach ".to_string()];
         let dup1 = state.duplicate_focused_koma(&prefixes, &[], None).unwrap();
-        assert_eq!(dup1.command.as_deref(), Some("zmx attach dev-2"));
-        assert_eq!(dup1.cwd.as_deref(), Some("/tmp"));
+        assert_eq!(dup1.command(), Some("zmx attach dev-2"));
+        assert_eq!(dup1.cwd(), Some("/tmp"));
 
         let dup2 = state
             .duplicate_focused_koma(&prefixes, &["dev-3".into()], None)
             .unwrap();
-        assert_eq!(dup2.command.as_deref(), Some("zmx attach dev-4"));
+        assert_eq!(dup2.command(), Some("zmx attach dev-4"));
 
         let plain = state.duplicate_focused_koma(&[], &[], None).unwrap();
-        assert_eq!(plain.command, None);
-        assert_eq!(plain.cwd.as_deref(), Some("/tmp"));
+        assert_eq!(plain.command(), None);
+        assert_eq!(plain.cwd(), Some("/tmp"));
     }
 
     #[test]
     fn insert_koma_after_places_next_to_caller_without_stealing_focus_when_inactive() {
         let mut state = WorkspaceState::new();
         let caller =
-            state.insert_koma_after_focused(KomaKind::Terminal, "Caller".into(), None, None);
+            state.insert_koma_after_focused("Caller".into(), KomaContent::terminal(None, None));
         let sibling =
-            state.insert_koma_after_focused(KomaKind::Terminal, "Sibling".into(), None, None);
+            state.insert_koma_after_focused("Sibling".into(), KomaContent::terminal(None, None));
         // Active sheet now focuses `sibling`; inserting after `caller` keeps focus on `sibling`.
         let (same_sheet, focused_active) = state.insert_koma_after(
-            KomaKind::Terminal,
             "AfterCaller".into(),
-            None,
-            None,
-            None,
+            KomaContent::terminal(None, None),
             Some(&caller.id),
         );
         assert!(!focused_active);
@@ -1386,11 +1341,8 @@ mod tests {
         let sheet2_id = state.current_sheet().id.clone();
         assert_eq!(state.current_sheet().id, sheet2_id);
         let (other_sheet, focused_active) = state.insert_koma_after(
-            KomaKind::Web,
             "Background".into(),
-            Some("https://example.com".into()),
-            None,
-            None,
+            KomaContent::web("https://example.com"),
             Some(&caller.id),
         );
         assert!(!focused_active);
@@ -1404,11 +1356,8 @@ mod tests {
         state.switch_sheet(0);
         state.focus_koma_by_id(&caller.id);
         let (focused_new, focused_active) = state.insert_koma_after(
-            KomaKind::Terminal,
             "FocusedNew".into(),
-            None,
-            None,
-            None,
+            KomaContent::terminal(None, None),
             Some(&caller.id),
         );
         assert!(focused_active);
@@ -1424,11 +1373,8 @@ mod tests {
         // Explicit target with focus=false keeps active sheet and applies width.
         let (placed, focused) = state
             .insert_koma_with_options(
-                KomaKind::Web,
                 "Docs".into(),
-                Some("https://example.com".into()),
-                None,
-                None,
+                KomaContent::web("https://example.com"),
                 None,
                 InsertKomaOptions {
                     target: Some((1, 0)),

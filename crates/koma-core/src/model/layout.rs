@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use super::{KomaMeta, SheetId, SheetState, WorkspaceState};
+use super::{Koma, SheetId, SheetState, WorkspaceState};
 
 impl WorkspaceState {
     /// Restore Sheets and Drawer while initializing transient state as for a new Workspace.
@@ -10,7 +10,7 @@ impl WorkspaceState {
         profile_id: String,
         mut sheets: Vec<SheetState>,
         active_sheet_index: usize,
-        drawer: Vec<KomaMeta>,
+        drawer: Vec<Koma>,
     ) -> Result<Self, String> {
         if active_sheet_index >= sheets.len() {
             return Err("State has no valid active Sheet".into());
@@ -79,7 +79,7 @@ impl WorkspaceState {
 
 #[cfg(test)]
 mod tests {
-    use super::super::KomaKind;
+    use super::super::KomaContent;
     use super::*;
 
     #[test]
@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn restore_layout_rejects_mismatched_koma_sheet_id() {
         let mut state = WorkspaceState::new();
-        state.insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None);
+        state.insert_koma_after_focused("Shell".into(), KomaContent::terminal(None, None));
         state.add_sheet(false);
         let base = state.sheets;
 

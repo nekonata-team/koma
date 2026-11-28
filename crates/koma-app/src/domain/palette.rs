@@ -128,7 +128,7 @@ pub fn candidates(query: &str, state: &WorkspaceState, config: &Config) -> Vec<P
     }
     for sheet in state.sheets() {
         for koma in &sheet.komas {
-            let label = format!("{} / {} [{}]", sheet.label, koma.label, koma.kind.as_str());
+            let label = format!("{} / {} [{}]", sheet.label, koma.label, koma.kind_str());
             if matches(&label) {
                 items.push(PaletteItem {
                     label,
@@ -154,7 +154,7 @@ pub fn candidates(query: &str, state: &WorkspaceState, config: &Config) -> Vec<P
 mod tests {
     use super::*;
     use crate::config::SheetPresetConfig;
-    use koma_core::model::KomaKind;
+    use koma_core::model::KomaContent;
     use std::collections::BTreeMap;
 
     #[test]
@@ -167,13 +167,10 @@ mod tests {
     #[test]
     fn typed_text_comes_first_then_matching_commands_and_komas() {
         let mut state = WorkspaceState::new();
-        let term = state.insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None);
-        let web = state.insert_koma_after_focused(
-            KomaKind::Web,
-            "Web".into(),
-            Some("https://example.com".into()),
-            None,
-        );
+        let term =
+            state.insert_koma_after_focused("Shell".into(), KomaContent::terminal(None, None));
+        let web =
+            state.insert_koma_after_focused("Web".into(), KomaContent::web("https://example.com"));
         let items = candidates("term", &state, &Config::default());
         assert_eq!(items[0].action, PaletteAction::Open);
         assert!(items
@@ -212,13 +209,8 @@ mod tests {
     #[test]
     fn lists_only_available_presets_in_precedence_order() {
         let mut state = WorkspaceState::new();
-        state.insert_koma_after_focused(KomaKind::Terminal, "Shell".into(), None, None);
-        state.insert_koma_after_focused(
-            KomaKind::Web,
-            "Web".into(),
-            Some("https://example.com".into()),
-            None,
-        );
+        state.insert_koma_after_focused("Shell".into(), KomaContent::terminal(None, None));
+        state.insert_koma_after_focused("Web".into(), KomaContent::web("https://example.com"));
         state.save_current_sheet_as_preset("Personal").unwrap();
         let config = Config::parse(
             r#"

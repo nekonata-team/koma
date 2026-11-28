@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use koma_app::config::{CenterFocused, ScaleConfig};
 use koma_app::ghostty_config::TerminalSettings;
-use koma_core::model::{InputMode, KomaId, KomaKind, SheetId, MIN_PROPORTIONAL_WIDTH};
+use koma_core::model::{InputMode, KomaContent, KomaId, SheetId, MIN_PROPORTIONAL_WIDTH};
 use makepad_widgets::event::ScrollPhase;
 use makepad_widgets::turtle::RowAlign;
 use makepad_widgets::*;
@@ -102,7 +102,7 @@ pub enum SheetStripAction {
 #[derive(Clone, Debug)]
 struct KomaSlot {
     koma_id: KomaId,
-    kind: KomaKind,
+    content: KomaContent,
     label: String,
     detail: String,
     raw_width: f64,
@@ -321,9 +321,9 @@ impl CardDrawer<'_> {
         } else {
             ""
         };
-        let kind_tag = match slot.kind {
-            KomaKind::Terminal => "TERM",
-            KomaKind::Web => "WEB",
+        let kind_tag = match slot.content {
+            KomaContent::Terminal { .. } => "TERM",
+            KomaContent::Web { .. } => "WEB",
         };
         let size_tag = match slot.ratio {
             Some(r) => format!("{}%", (r * 100.0).round() as i32),
@@ -487,7 +487,7 @@ impl SheetStrip {
                     Some(r) => (r * usable - (1.0 - r) * self.koma_gap).max(MIN_PROPORTIONAL_WIDTH),
                     None => slot.raw_width,
                 };
-                if slot.kind == KomaKind::Web {
+                if slot.content.is_web() {
                     if let Some(live_url) = rt
                         .as_ref()
                         .and_then(|r| r.koma_url_title(&slot.koma_id).map(|(u, _)| u))

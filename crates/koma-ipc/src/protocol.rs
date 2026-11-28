@@ -256,11 +256,16 @@ pub struct WorkspaceEndpoint {
 }
 
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
+pub enum KomaSummaryContent {
+    Terminal,
+    Web { url: String },
+}
+
+#[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
 pub struct KomaSummary {
     pub id: String,
-    pub kind: String,
     pub label: String,
-    pub url: Option<String>,
+    pub content: KomaSummaryContent,
     pub is_focused: bool,
 }
 
@@ -287,12 +292,21 @@ pub struct SheetListEntry {
 }
 
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
+pub enum DrawerItemContent {
+    Terminal {
+        /// Absent until a path is given or reported by the shell (OSC 7).
+        cwd: Option<String>,
+    },
+    Web {
+        url: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
 pub struct DrawerItemSummary {
     pub id: String,
-    pub kind: String,
     pub label: String,
-    pub url: Option<String>,
-    pub cwd: Option<String>,
+    pub content: DrawerItemContent,
 }
 
 #[derive(Clone, Debug, PartialEq, SerJson, DeJson)]
@@ -746,16 +760,16 @@ mod tests {
     fn all_ipc_payloads_json_round_trip() {
         let sample_koma = KomaSummary {
             id: "k-1".into(),
-            kind: "web".into(),
             label: "Example".into(),
-            url: Some("https://example.com".into()),
+            content: KomaSummaryContent::Web {
+                url: "https://example.com".into(),
+            },
             is_focused: true,
         };
         let sample_koma_no_url = KomaSummary {
             id: "k-2".into(),
-            kind: "terminal".into(),
             label: "Shell".into(),
-            url: None,
+            content: KomaSummaryContent::Terminal,
             is_focused: false,
         };
 
@@ -870,17 +884,17 @@ mod tests {
                 items: vec![
                     DrawerItemSummary {
                         id: "d-1".into(),
-                        kind: "web".into(),
                         label: "Example".into(),
-                        url: Some("https://example.com".into()),
-                        cwd: None,
+                        content: DrawerItemContent::Web {
+                            url: "https://example.com".into(),
+                        },
                     },
                     DrawerItemSummary {
                         id: "d-2".into(),
-                        kind: "terminal".into(),
                         label: "Shell".into(),
-                        url: None,
-                        cwd: Some("/tmp".into()),
+                        content: DrawerItemContent::Terminal {
+                            cwd: Some("/tmp".into()),
+                        },
                     },
                 ],
             },
