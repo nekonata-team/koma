@@ -52,6 +52,11 @@ const COMMANDS: &[(&str, RouteDecision)] = &[
     ("Rename koma", RouteDecision::RenameFocusedKoma),
     ("Rename sheet", RouteDecision::RenameCurrentSheet),
     ("Reload config", RouteDecision::ReloadConfig),
+    ("Screenshot koma", RouteDecision::ScreenshotFocusedKoma),
+    (
+        "Copy koma screenshot",
+        RouteDecision::CopyFocusedKomaScreenshot,
+    ),
     ("Reload web", RouteDecision::ReloadFocusedWeb),
     ("Web back", RouteDecision::HistoryBackFocusedWeb),
     ("Web forward", RouteDecision::HistoryForwardFocusedWeb),

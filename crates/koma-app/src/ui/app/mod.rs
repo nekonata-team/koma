@@ -302,6 +302,8 @@ pub struct App {
     last_web_toast: Option<std::time::Instant>,
     #[rust]
     web_dialogs: WebDialogManager,
+    #[rust]
+    pending_screenshot_save: Option<Vec<u8>>,
 }
 
 pub(super) fn home_dir_string() -> Option<String> {

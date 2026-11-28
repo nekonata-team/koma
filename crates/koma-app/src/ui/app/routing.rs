@@ -332,6 +332,10 @@ impl App {
                 Ok(()) => self.show_toast(cx, "Reloaded config"),
                 Err(err) => self.show_toast(cx, err),
             },
+            RouteDecision::ScreenshotFocusedKoma => self.capture_focused_koma_screenshot(cx, false),
+            RouteDecision::CopyFocusedKomaScreenshot => {
+                self.capture_focused_koma_screenshot(cx, true)
+            }
             RouteDecision::HistoryBackFocusedWeb => {
                 if let Some(id) = self.focused_web_id() {
                     self.web_runtime().borrow_mut().go_back(cx, &id);
@@ -399,6 +403,120 @@ impl App {
             RouteDecision::SetDefaultBrowser => default_browser::set(),
             RouteDecision::Forward | RouteDecision::Consume => {}
         }
+    }
+
+    pub(super) fn capture_focused_koma_screenshot(&mut self, cx: &mut Cx, to_clipboard: bool) {
+        let Some(koma) = self.state.current_sheet().focused_koma() else {
+            self.show_toast(cx, "No focused Koma");
+            return;
+        };
+        let koma_id = koma.id.clone();
+        let label = koma.label.clone();
+        let queued = self.with_strip_mut(cx, |strip, cx| {
+            strip.queue_koma_capture(
+                cx,
+                koma_id,
+                Box::new(move |result| {
+                    std::thread::spawn(move || match result {
+                        Ok((w, h, rgba)) if to_clipboard => {
+                            let msg = match crate::runtime::platform::copy_rgba_to_clipboard(
+                                w as usize, h as usize, rgba,
+                            ) {
+                                Ok(()) => "Copied screenshot to clipboard".into(),
+                                Err(err) => err,
+                            };
+                            Cx::post_action(ScreenshotToast(msg));
+                        }
+                        Ok((w, h, rgba)) => {
+                            match super::ipc_dispatch::encode_png_rgba(w, h, &rgba) {
+                                Ok(png) => Cx::post_action(ScreenshotReadyForSave {
+                                    filename: suggested_screenshot_filename(&label),
+                                    png,
+                                }),
+                                Err(err) => Cx::post_action(ScreenshotToast(err)),
+                            }
+                        }
+                        Err(err) => Cx::post_action(ScreenshotToast(err)),
+                    });
+                }),
+            )
+        });
+        match queued {
+            Some(Ok(())) => cx.redraw_all(),
+            Some(Err(err)) => self.show_toast(cx, err),
+            None => self.show_toast(cx, "Sheet Strip unavailable"),
+        }
+    }
+
+    pub(super) fn handle_screenshot_file_dialog(
+        &mut self,
+        cx: &mut Cx,
+        action: &makepad_widgets::makepad_platform::file_dialogs::FileDialogAction,
+    ) -> bool {
+        use makepad_widgets::makepad_platform::file_dialogs::FileDialogAction;
+        match action {
+            FileDialogAction::SaveFileSelected { id, path }
+                if *id == live_id!(koma_screenshot_save) =>
+            {
+                let Some(png) = self.pending_screenshot_save.take() else {
+                    return true;
+                };
+                match std::fs::write(path, &png) {
+                    Ok(()) => {
+                        let name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.display().to_string());
+                        self.show_toast(cx, format!("Saved {name}"));
+                    }
+                    Err(err) => self.show_toast(
+                        cx,
+                        format!("Failed to write screenshot to {}: {err}", path.display()),
+                    ),
+                }
+                true
+            }
+            FileDialogAction::SaveFileCancelled { id } if *id == live_id!(koma_screenshot_save) => {
+                self.pending_screenshot_save = None;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct ScreenshotReadyForSave {
+    pub(super) filename: String,
+    pub(super) png: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub(super) struct ScreenshotToast(pub(super) String);
+
+fn suggested_screenshot_filename(label: &str) -> String {
+    let slug: String = label
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .chars()
+        .take(40)
+        .collect();
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if slug.is_empty() {
+        format!("koma-screenshot-{secs}.png")
+    } else {
+        format!("koma-{slug}-{secs}.png")
     }
 }
 

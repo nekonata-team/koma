@@ -665,7 +665,7 @@ impl App {
         let reply_slot = std::sync::Arc::new(std::sync::Mutex::new(Some(reply)));
         let reply_cb = std::sync::Arc::clone(&reply_slot);
         let queued = self.with_strip_mut(cx, |strip, cx| {
-            strip.queue_terminal_capture(
+            strip.queue_koma_capture(
                 cx,
                 koma_id,
                 Box::new(move |result| {
@@ -1011,11 +1011,7 @@ impl App {
     }
 }
 
-fn write_png_file(dest: &Path, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
-    if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
-    }
+pub(super) fn encode_png_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     let options = EncoderOptions::default()
         .set_width(width as usize)
         .set_height(height as usize)
@@ -1025,6 +1021,15 @@ fn write_png_file(dest: &Path, width: u32, height: u32, rgba: &[u8]) -> Result<(
     PngEncoder::new(rgba, options)
         .encode(&mut png)
         .map_err(|e| format!("Failed to encode PNG: {e:?}"))?;
+    Ok(png)
+}
+
+fn write_png_file(dest: &Path, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
+    if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
+    }
+    let png = encode_png_rgba(width, height, rgba)?;
     std::fs::write(dest, &png)
         .map_err(|e| format!("Failed to write screenshot to {}: {e}", dest.display()))
 }

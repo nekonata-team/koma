@@ -5,7 +5,7 @@ use std::path::Path;
 use koma_app::domain::router::{route_key_with_bindings, OverlayKind, RouteDecision};
 use koma_core::model::InputMode;
 use makepad_app_terminal::widget::MpTermAction;
-use makepad_widgets::makepad_platform::file_dialogs::FileDialogAction;
+use makepad_widgets::makepad_platform::file_dialogs::{FileDialog, FileDialogAction};
 use makepad_widgets::*;
 
 use crate::runtime::platform;
@@ -14,8 +14,8 @@ use crate::ui::overlay_list::{self, OverlayListWidgetRefExt};
 use crate::ui::sheet_strip::{self, SheetStripAction};
 use crate::ui::web_koma::{self, WebKomaAction};
 
-use super::lifecycle;
 use super::web_dialogs::WebModalRequest;
+use super::{lifecycle, routing};
 use super::{App, PromptMode};
 
 fn sync_handled_key_down(
@@ -517,7 +517,24 @@ impl MatchEvent for App {
 
         let mut terminal_metadata_changed = false;
         for action in actions {
+            if let Some(ready) = action.downcast_ref::<routing::ScreenshotReadyForSave>() {
+                self.pending_screenshot_save = Some(ready.png.clone());
+                cx.open_save_file_dialog(
+                    FileDialog::new()
+                        .set_id(live_id!(koma_screenshot_save))
+                        .set_filename(ready.filename.clone())
+                        .add_filter("PNG Image".into(), vec!["png".into()]),
+                );
+                continue;
+            }
+            if let Some(toast) = action.downcast_ref::<routing::ScreenshotToast>() {
+                self.show_toast(cx, toast.0.clone());
+                continue;
+            }
             if let Some(file_action) = action.downcast_ref::<FileDialogAction>() {
+                if self.handle_screenshot_file_dialog(cx, file_action) {
+                    continue;
+                }
                 let web_runtime = self
                     .web_runtime
                     .as_ref()

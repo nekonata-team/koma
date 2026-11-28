@@ -13,6 +13,7 @@ makepad-app-terminal.workspace = true
 makepad-micro-serde.workspace = true
 toml = "1.2.1"
 getrandom = "0.4"
+arboard = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 makepad-apple-sys.workspace = true

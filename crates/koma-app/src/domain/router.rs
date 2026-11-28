@@ -116,6 +116,8 @@ pub enum RouteDecision {
     ReopenClosedKoma,
     ReloadFocusedWeb,
     ReloadConfig,
+    ScreenshotFocusedKoma,
+    CopyFocusedKomaScreenshot,
     HistoryBackFocusedWeb,
     HistoryForwardFocusedWeb,
     ToggleDrawer,
@@ -285,6 +287,8 @@ pub fn parse_action(name: &str) -> Result<Option<RouteDecision>, String> {
         "reopen_koma" => RouteDecision::ReopenClosedKoma,
         "reload_web" => RouteDecision::ReloadFocusedWeb,
         "reload_config" => RouteDecision::ReloadConfig,
+        "screenshot_koma" => RouteDecision::ScreenshotFocusedKoma,
+        "copy_koma_screenshot" => RouteDecision::CopyFocusedKomaScreenshot,
         "web_back" => RouteDecision::HistoryBackFocusedWeb,
         "web_forward" => RouteDecision::HistoryForwardFocusedWeb,
         "toggle_drawer" => RouteDecision::ToggleDrawer,
@@ -461,6 +465,8 @@ fn route_koma_mode(stroke: KeyStroke) -> RouteDecision {
         Key::A => RouteDecision::StowFocusedToDrawer,
         Key::U => RouteDecision::ReopenClosedKoma,
         Key::M => RouteDecision::ToggleNotifications,
+        Key::S if stroke.ctrl => RouteDecision::CopyFocusedKomaScreenshot,
+        Key::S => RouteDecision::ScreenshotFocusedKoma,
         Key::I if stroke.shift => RouteDecision::OpenDevTools,
         Key::Escape | Key::I | Key::Return => RouteDecision::EnterContentInput,
         _ => RouteDecision::Consume,
@@ -1098,6 +1104,23 @@ mod tests {
         assert_eq!(
             route_key_with_bindings(InputMode::KomaMode, OverlayKind::None, key_x, &bindings),
             RouteDecision::Consume
+        );
+    }
+
+    #[test]
+    fn koma_mode_routes_screenshot_and_copy_screenshot() {
+        let key_s = key(Key::S);
+        let ctrl_s = KeyStroke {
+            ctrl: true,
+            ..key(Key::S)
+        };
+        assert_eq!(
+            route_key(InputMode::KomaMode, false, key_s),
+            RouteDecision::ScreenshotFocusedKoma
+        );
+        assert_eq!(
+            route_key(InputMode::KomaMode, false, ctrl_s),
+            RouteDecision::CopyFocusedKomaScreenshot
         );
     }
 }

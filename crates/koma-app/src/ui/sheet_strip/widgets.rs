@@ -807,18 +807,14 @@ pub(super) struct InFlightCapture {
 }
 
 impl SheetStrip {
-    pub fn queue_terminal_capture(
+    pub fn queue_koma_capture(
         &mut self,
         cx: &mut Cx,
         koma_id: KomaId,
         on_done: CaptureCallback,
     ) -> Result<(), String> {
-        let ready = self
-            .koma_widgets
-            .get(&koma_id)
-            .is_some_and(KomaWidget::is_terminal);
-        if !ready {
-            return Err(format!("Terminal not ready: {koma_id}"));
+        if !self.koma_widgets.contains_key(&koma_id) {
+            return Err(format!("Koma not ready: {koma_id}"));
         }
         self.pending_captures
             .push(PendingCaptureRequest { koma_id, on_done });
@@ -844,12 +840,8 @@ impl SheetStrip {
                 .flat_map(|s| s.komas.iter())
                 .find(|k| k.koma_id == req.koma_id)
                 .map(|k| k.width);
-            let Some(widget) = self
-                .koma_widgets
-                .get_mut(&req.koma_id)
-                .filter(|w| w.is_terminal())
-            else {
-                (req.on_done)(Err(format!("Terminal not ready: {}", req.koma_id)));
+            let Some(widget) = self.koma_widgets.get_mut(&req.koma_id) else {
+                (req.on_done)(Err(format!("Koma not ready: {}", req.koma_id)));
                 continue;
             };
             let area = widget.as_widget().area();

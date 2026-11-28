@@ -1,5 +1,17 @@
 //! OS-specific non-UI helpers (external URL launch, macOS default-browser integration).
 
+pub fn copy_rgba_to_clipboard(width: usize, height: usize, rgba: Vec<u8>) -> Result<(), String> {
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("Failed to open clipboard: {e}"))?;
+    clipboard
+        .set_image(arboard::ImageData {
+            width,
+            height,
+            bytes: std::borrow::Cow::Owned(rgba),
+        })
+        .map_err(|e| format!("Failed to copy screenshot to clipboard: {e}"))
+}
+
 pub fn open_external_app_url(url: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let mut cmd = {
