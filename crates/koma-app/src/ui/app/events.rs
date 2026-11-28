@@ -674,6 +674,7 @@ impl AppMain for App {
         }
 
         self.sync_focus_from_ui(cx);
+        self.sync_caption_bar_overview(cx);
     }
 }
 

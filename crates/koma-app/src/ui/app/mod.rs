@@ -39,6 +39,18 @@ script_mod! {
             main_window := Window{
                 window.inner_size: vec2(1280, 760)
                 window.title: "Koma [Sheet 1] — CONTENT INPUT"
+                caption_bar +: {
+                    draw_bg +: {
+                        color: theme.color_surface
+                        overview_color: uniform(mix(theme.color_surface, #0, 0.3))
+                        overview_t: uniform(0.0)
+                        pixel: fn() {
+                            let c = self.color.mix(self.overview_color, self.overview_t)
+                            if self.color_unfocused.x < 0.0 { return Pal.premul(c) }
+                            return Pal.premul(self.color_unfocused.mix(c, self.window_focus))
+                        }
+                    }
+                }
                 body +: {
                     flow: Overlay
                     padding: 0
@@ -277,6 +289,8 @@ pub struct App {
     #[rust]
     is_private: bool,
     #[rust]
+    last_caption_overview_t: f64,
+    #[rust]
     private_cef_dir: Option<PathBuf>,
     #[rust]
     palette_items: Vec<PaletteItem>,
@@ -379,6 +393,22 @@ impl App {
                 reveal_focused,
             );
         });
+    }
+
+    pub(super) fn sync_caption_bar_overview(&mut self, cx: &mut Cx) {
+        let Some(t) = self.with_strip(cx, |strip, _| strip.overview_t()) else {
+            return;
+        };
+        if (t - self.last_caption_overview_t).abs() <= 1e-4 {
+            return;
+        }
+        self.last_caption_overview_t = t;
+        let t = t.clamp(0.0, 1.0) as f32;
+        let mut caption = self.ui.view(cx, ids!(main_window.caption_bar));
+        script_apply_eval!(cx, caption, {
+            draw_bg +: {overview_t: #(t)}
+        });
+        caption.redraw(cx);
     }
 
     fn current_overlay(&self) -> OverlayKind {

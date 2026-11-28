@@ -278,13 +278,18 @@ impl SheetStrip {
             .and_then(|d| d.drop_target);
         let hovered_id = self.overview.hovered_koma.as_ref();
         let overview_t = self.overview.t;
-        let theme_colors = self.theme_colors;
+        let accent = self.draw_drop_bar.color;
+        let border = self.overview_border;
+        let header = self.overview_header;
+        let selected_header = header * 0.8 + accent * 0.2;
+        let hover_header = header * 0.9 + accent * 0.1;
+        let hover_border = header * 0.5 + accent * 0.5;
         let koma_gap = self.koma_gap;
         let active_sheet = self.active_sheet;
         let mut drawer = CardDrawer {
             mode: self.mode,
-            theme_colors,
-            accent_color: self.draw_drop_bar.color,
+            theme_colors: self.theme_colors,
+            accent_color: accent,
             koma_gap,
             draw_border: &mut self.draw_border,
             draw_header: &mut self.draw_header,
@@ -320,15 +325,10 @@ impl SheetStrip {
                     pos: sheet_local_rect.pos - dvec2(4.0, 4.0),
                     size: sheet_local_rect.size + dvec2(8.0, 8.0),
                 };
-                drawer.draw_border.color = theme_colors.overview_active_sheet_border;
+                drawer.draw_border.color = accent;
                 drawer.draw_border.draw_abs(cx, frame);
             }
-            self.draw_sheet_bg.color = if is_active_sheet {
-                theme_colors.overview_active_sheet_bg
-            } else {
-                theme_colors.overview_inactive_sheet_bg
-            };
-            self.draw_sheet_bg.draw_abs(cx, sheet_local_rect);
+            self.draw_strip_bg.draw_abs(cx, sheet_local_rect);
 
             if overview_t > 0.05 {
                 let label_pos = dvec2(
@@ -372,6 +372,15 @@ impl SheetStrip {
                         Walk::fixed(slot.width, card_h).with_abs_pos(card_local_rect.pos);
                     let is_hovered = hovered_id == Some(&slot.koma_id);
                     let is_selected = is_active_sheet && slot.focused;
+                    let colors = if self.mode != InputMode::Overview {
+                        drawer.slot_colors(is_selected)
+                    } else if is_selected {
+                        (accent, selected_header)
+                    } else if is_hovered {
+                        (hover_border, hover_header)
+                    } else {
+                        (border, header)
+                    };
                     let _ = drawer.draw_card(
                         cx,
                         scope,
@@ -379,8 +388,8 @@ impl SheetStrip {
                         card_walk,
                         CardStyle {
                             focused: is_selected,
-                            highlight_glow: overview_t > 0.05,
-                            hovered: is_hovered,
+                            highlight_glow: overview_t > 0.05 && (is_selected || is_hovered),
+                            colors,
                         },
                     );
                     if slot.content.is_web() {

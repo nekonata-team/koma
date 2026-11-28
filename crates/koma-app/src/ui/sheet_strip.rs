@@ -49,11 +49,10 @@ script_mod! {
             color: theme.color_surface
         }
         draw_overview_bg +: {
-            color: theme.color_surface_dim
+            color: mix(theme.color_surface, #0, 0.3)
         }
-        draw_sheet_bg +: {
-            color: theme.color_surface_container_low
-        }
+        overview_border: theme.color_outline_variant
+        overview_header: theme.color_surface_container
         draw_border +: {
             color: theme.color_outline_variant
         }
@@ -157,14 +156,8 @@ struct StripThemeColors {
     dark: bool,
     koma_mode_border: Vec4f,
     koma_mode_header: Vec4f,
-    overview_focus_header: Vec4f,
     inactive_border: Vec4f,
     inactive_header: Vec4f,
-    hover_border: Vec4f,
-    hover_header: Vec4f,
-    overview_active_sheet_border: Vec4f,
-    overview_active_sheet_bg: Vec4f,
-    overview_inactive_sheet_bg: Vec4f,
 }
 
 impl Default for StripThemeColors {
@@ -180,28 +173,16 @@ impl StripThemeColors {
                 dark: true,
                 koma_mode_border: vec4(0.22, 0.74, 0.97, 1.0),
                 koma_mode_header: vec4(0.11, 0.22, 0.33, 1.0),
-                overview_focus_header: vec4(0.11, 0.25, 0.38, 1.0),
                 inactive_border: vec4(0.16, 0.19, 0.27, 1.0),
                 inactive_header: vec4(0.09, 0.10, 0.15, 1.0),
-                hover_border: vec4(0.48, 0.64, 0.97, 1.0),
-                hover_header: vec4(0.14, 0.19, 0.30, 1.0),
-                overview_active_sheet_border: vec4(0.18, 0.36, 0.56, 1.0),
-                overview_active_sheet_bg: vec4(0.08, 0.10, 0.16, 1.0),
-                overview_inactive_sheet_bg: vec4(0.06, 0.08, 0.12, 1.0),
             }
         } else {
             Self {
                 dark: false,
                 koma_mode_border: vec4(0.02, 0.52, 0.78, 1.0),
                 koma_mode_header: vec4(0.82, 0.93, 0.98, 1.0),
-                overview_focus_header: vec4(0.82, 0.93, 0.98, 1.0),
                 inactive_border: vec4(0.78, 0.81, 0.86, 1.0),
                 inactive_header: vec4(0.91, 0.93, 0.96, 1.0),
-                hover_border: vec4(0.35, 0.55, 0.95, 1.0),
-                hover_header: vec4(0.88, 0.92, 0.98, 1.0),
-                overview_active_sheet_border: vec4(0.45, 0.67, 0.86, 1.0),
-                overview_active_sheet_bg: vec4(0.95, 0.96, 0.98, 1.0),
-                overview_inactive_sheet_bg: vec4(0.90, 0.92, 0.95, 1.0),
             }
         }
     }
@@ -211,7 +192,7 @@ impl StripThemeColors {
 struct CardStyle {
     focused: bool,
     highlight_glow: bool,
-    hovered: bool,
+    colors: (Vec4f, Vec4f),
 }
 
 struct CardDrawer<'a> {
@@ -226,22 +207,13 @@ struct CardDrawer<'a> {
 }
 
 impl CardDrawer<'_> {
-    fn slot_colors(&self, focused: bool, hovered: bool) -> (Vec4f, Vec4f) {
+    fn slot_colors(&self, focused: bool) -> (Vec4f, Vec4f) {
         let t = &self.theme_colors;
-        if self.mode == InputMode::Overview {
-            if focused {
-                return (t.koma_mode_border, t.overview_focus_header);
-            }
-            if hovered {
-                return (t.hover_border, t.hover_header);
-            }
-            return (t.inactive_border, t.inactive_header);
-        }
         if !focused {
             return (t.inactive_border, t.inactive_header);
         }
         match self.mode {
-            InputMode::KomaMode => (t.koma_mode_border, t.koma_mode_header),
+            InputMode::KomaMode | InputMode::Overview => (t.koma_mode_border, t.koma_mode_header),
             InputMode::ContentInput => {
                 // Reuse `draw_drop_bar.color` so ContentInput focus tracks `theme.color_primary`.
                 let accent = self.accent_color;
@@ -249,7 +221,6 @@ impl CardDrawer<'_> {
                 let header = t.inactive_header * (1.0 - mix) + accent * mix;
                 (accent, vec4(header.x, header.y, header.z, 1.0))
             }
-            InputMode::Overview => (t.koma_mode_border, t.overview_focus_header),
         }
     }
 
@@ -261,9 +232,9 @@ impl CardDrawer<'_> {
         card_walk: Walk,
         style: CardStyle,
     ) -> Rect {
-        let (border_color, header_color) = self.slot_colors(style.focused, style.hovered);
+        let (border_color, header_color) = style.colors;
         let card_preview = cx.peek_walk_turtle(card_walk);
-        if style.highlight_glow && (style.focused || style.hovered) {
+        if style.highlight_glow {
             let glow_rect = Rect {
                 pos: card_preview.pos - dvec2(4.0, 4.0),
                 size: card_preview.size + dvec2(8.0, 8.0),
@@ -386,7 +357,7 @@ impl CardDrawer<'_> {
                     CardStyle {
                         focused: slot.focused,
                         highlight_glow: false,
-                        hovered: false,
+                        colors: self.slot_colors(slot.focused),
                     },
                 );
                 if let Some(rects) = card_rects.as_deref_mut() {
@@ -414,7 +385,9 @@ pub struct SheetStrip {
     #[live]
     draw_overview_bg: DrawColor,
     #[live]
-    draw_sheet_bg: DrawColor,
+    overview_border: Vec4f,
+    #[live]
+    overview_header: Vec4f,
     #[live]
     draw_border: DrawColor,
     #[live]
@@ -474,6 +447,10 @@ pub struct SheetStrip {
 }
 
 impl SheetStrip {
+    pub fn overview_t(&self) -> f64 {
+        self.overview.t
+    }
+
     pub fn usable_width(&self) -> f64 {
         (self.effective_viewport_size().x - 2.0 * self.koma_gap).max(MIN_PROPORTIONAL_WIDTH)
     }
@@ -819,7 +796,7 @@ impl Widget for SheetStrip {
                     CardStyle {
                         focused: slot.focused,
                         highlight_glow: false,
-                        hovered: false,
+                        colors: drawer.slot_colors(slot.focused),
                     },
                 );
                 self.card_rects.push((slot.koma_id.clone(), drawn_rect));
